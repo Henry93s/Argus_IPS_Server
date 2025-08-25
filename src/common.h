@@ -1,6 +1,41 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+// rawpacket 구조체 정의
+typedef struct {
+    unsigned char* data;
+    unsigned int len;
+} RawPacket;
+
+// 큐의 각 노드를 나타내는 구조체
+typedef struct PacketNode {
+    // 실제 패킷 데이터 포인터
+    RawPacket* packet;
+    // 다음 노드 (linkedlist)
+    struct PacketNode* next;
+} PacketNode;
+
+// 스레드-안전 패킷 큐 중 PacketQueue 구조체
+typedef struct {
+    // 큐의 시작 (데이터를 꺼내는 곳)
+    PacketNode* head;
+    // 큐의 끝 (데이터를 넣는 곳)
+    PacketNode* tail;
+    int count;                      
+    pthread_mutex_t lock;
+    // 큐가 비어있거나 데이터가 추가될 때 대기/알림을 위한 조건 변수
+    pthread_cond_t cond;
+    // 프로그램 종료 신호를 받기 위한 포인터
+    volatile sig_atomic_t* isRunning;
+} PacketQueue;
+
+// 각 스레드에 필요한 자원들의 포인터를 담는 구조체
+typedef struct {
+    PacketQueue* packetQueue;
+    // AlertQueue* alertQueue;
+    volatile sig_atomic_t* isRunning;
+} ThreadArgs;
+
 #pragma pack(push, 1)
 typedef struct EtherHeader{
     unsigned char dstMac[6];
