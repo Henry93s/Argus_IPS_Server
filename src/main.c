@@ -1,27 +1,3 @@
-<<<<<<< HEAD
-#include "linkedList.h"
-#include <stdlib.h>
-
-int main() {
-    LinkedList list;
-    initialize(&list);
-
-    Node* node1 = (Node*)malloc(sizeof(Node));
-    Node* node2 = (Node*)malloc(sizeof(Node));
-    Node* node3 = (Node*)malloc(sizeof(Node));
-
-    push_back(&list, node1);
-    push_back(&list, node2);
-    push_back(&list, node3);
-
-    printList(&list);
-
-    clear(&list);
-
-    printList(&list);
-
-    return 0;
-=======
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -34,7 +10,7 @@ int main() {
 
 #include "common.h"           // 공용 구조체 (형건우)
 #include "ts_packet_queue.h"    // Packet Queue (형건우)
-// #include "ts_alert_queue.h"     // Alert Queue (김선권)
+#include "ts_alert_queue.h"     // Alert Queue (김선권)
 #include "thread_capture.h"     // libpcap 캡처 스레드 (형건우)
 // #include "thread_nfqueue.h"     // NFQUEUE 수신 스레드 (최현구)
 // #include "thread_parser.h"   // 파싱/분류 스레드 (형건우)
@@ -66,7 +42,6 @@ void* handle_client_comm(void* arg);
 
 // main 함수
 int main(int argc, char *argv[]) {
-    
     printf("Argus IPS 초기화 진행 중...\n");
 
     // Ctrl+C, 프로세스 종료 시그널 수신 시ㄴ 핸들 함수 호출
@@ -301,5 +276,4 @@ void* client_connection_thread(void* arg) {
 
     printf("클라이언트 연결 관리 스레드가 종료됩니다.\n");
     return NULL;
->>>>>>> dev
 }

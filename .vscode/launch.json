@@ -1,13 +1,13 @@
 {
   "version": "0.2.0",
   "configurations": [
-    {
-      "name": "C/C++ Runner: Debug Session",
-      "type": "lldb",
-      "request": "launch",
-      "args": [],
-      "cwd": "/Users/geonwoohyung/Documents/ArgusServer",
-      "program": "/Users/geonwoohyung/Documents/ArgusServer/build/Debug/outDebug"
-    }
+    // {
+    //   "name": "C/C++ Runner: Debug Session",
+    //   "type": "cppbuild",
+    //   "request": "launch",
+    //   "args": [],
+    //   "cwd": "/Users/geonwoohyung/Documents/ArgusServer",
+    //   "program": "/Users/geonwoohyung/Documents/ArgusServer/build/Debug/outDebug"
+    // }
   ]
 }

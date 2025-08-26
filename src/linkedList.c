@@ -2,31 +2,31 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void initialize(LinkedList *list)
+void initialize_linkedList(LinkedList *list)
 {
     list->head = NULL;
     list->tail = NULL;
     list->size = 0;
 }
 
-void clear(LinkedList *list)
+void clear_linkedList(LinkedList *list)
 {
-    while(!isEmpty(list)){
-        pop_back(list);
+    while(!isEmpty_linkedList(list)){
+        pop_back_linkedList(list);
     }
 }
 
-int getSize(LinkedList *list)
+int getSize_linkedList(LinkedList *list)
 {
     return list->size;
 }
 
-int isEmpty(LinkedList * list)
+int isEmpty_linkedList(LinkedList * list)
 {
     return list->size == 0;
 }
 
-void pop_back(LinkedList *list)
+void pop_back_linkedList(LinkedList *list)
 {
     Node* toDelete = list->tail;
 
@@ -46,7 +46,7 @@ void pop_back(LinkedList *list)
     }
 }
 
-void pop_front(LinkedList *list)
+void pop_front_linkedList(LinkedList *list)
 {
     Node* toDelete = list->head;
     
@@ -65,12 +65,12 @@ void pop_front(LinkedList *list)
     }
 }
 
-void push_back(LinkedList *list,  Node* node)
+void push_back_linkedList(LinkedList *list,  Node* node)
 {
     node->next = NULL;
     node->prev = NULL;
     // 노드가 비어있음
-    if(isEmpty(list)){
+    if(isEmpty_linkedList(list)){
         list->head = node;
     }
     // 노드가 하나 이상 있음
@@ -82,12 +82,12 @@ void push_back(LinkedList *list,  Node* node)
     list->size++;
 }
 
-void push_front(LinkedList *list,  Node* node)
+void push_front_linkedList(LinkedList *list,  Node* node)
 {
     node->next = NULL;
     node->prev = NULL;
     // 노드가 비어있음
-    if(isEmpty(list)){
+    if(isEmpty_linkedList(list)){
         list->tail = node;
     }
     // 노드가 하나 이상 있음
@@ -99,19 +99,19 @@ void push_front(LinkedList *list,  Node* node)
     list->size++;
 }
 
-Node *peek_back(LinkedList *list)
+Node *peek_back_linkedList(LinkedList *list)
 {
     return list->tail;
 }
 
-Node *peek_front(LinkedList *list)
+Node *peek_front_linkedList(LinkedList *list)
 {
     return list->head;
 }
 
-void printList(LinkedList *list)
+void printList_linkedList(LinkedList *list)
 {
-    if(isEmpty(list)) return;
+    if(isEmpty_linkedList(list)) return;
 
     Node* present = list->head;
 
