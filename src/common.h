@@ -1,6 +1,10 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include <pthread.h>
+#include <signal.h>
+#include <stdint.h>
+
 // rawpacket 구조체 정의
 typedef struct {
     unsigned char* data;

@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <errno.h> // plus
 
 #include "common.h"           // 공용 구조체 (형건우)
 #include "ts_packet_queue.h"    // Packet Queue (형건우)
@@ -16,6 +17,23 @@
 // #include "thread_parser.h"   // 파싱/분류 스레드 (형건우)
 // #include "thread_analyzer.h" // 융합/위협 분석 스레드 (형건우)
 // #include "thread_response.h"  // 후처리/로깅 스레드 (김선권)
+
+// warnning message, helper func.
+static ssize_t write_all(int fd, const void* buf, size_t len) {
+    const char* p = (const char*)buf;
+    size_t left = len;
+    while (left > 0) {
+        ssize_t n = write(fd, p, left);
+        if (n < 0) {
+            if (errno == EINTR) continue; // 시그널이면 재시도
+            return -1;                    // 진짜 오류
+        }
+        if (n == 0) break;                // 더 이상 못 씀
+        p += n;
+        left -= n;
+    }
+    return (ssize_t)(len - left);         // 실제 쓴 바이트
+}
 
 // 전역 서버 소켓(== server_sock) -> 클라이언트 연결 관리/종료 시
 int server_sock_global;
@@ -167,7 +185,15 @@ void* handle_client_comm(void* arg) {
         // (예: "스트리밍 시작" 명령을 받으면, 홈캠 서버로 전달)
 
         // 명령 처리 후 응답처리 (간단하게 일단.. 첫 싲ㅏㄱ이므로 !)
-        write(client_sock, "명령 수신 완료\n", strlen("명령 수신 완료\n"));
+
+        {
+            const char* msg = "명령 수신 완료\n";
+            if (write_all(client_sock, msg, strlen(msg)) < 0) {
+                perror("write_all");
+            }
+        }
+
+//        (void)write(client_sock, "명령 수신 완료\n", strlen("명령 수신 완료\n"));
     }
 
     // read()가 0 이하를 반환하면 클라이언트 연결이 끊긴 것
@@ -268,7 +294,13 @@ void* client_connection_thread(void* arg) {
             pthread_detach(tid); 
         } else {
             printf("클라이언트 수용량 초과. 연결을 거부합니다.\n");
-            write(client_sock, "서버가 가득 찼습니다.\n", strlen("서버가 가득 찼습니다.\n"));
+
+            {
+                const char* full = "서버가 가득찼습니다.\n";
+                (void)write_all(client_sock, full, strlen(full));
+            }
+
+//            (void)write(client_sock, "서버가 가득 찼습니다.\n", strlen("서버가 가득 찼습니다.\n"));
             close(client_sock);
         }
     }
