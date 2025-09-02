@@ -8,14 +8,15 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include "common.h"           // 공용 구조체 (형건우)
-#include "ts_packet_queue.h"    // Packet Queue (형건우)
-// #include "ts_alert_queue.h"     // Alert Queue (김선권)
-#include "thread_capture.h"     // libpcap 캡처 스레드 (형건우)
-// #include "thread_nfqueue.h"     // NFQUEUE 수신 스레드 (최현구)
-// #include "thread_parser.h"   // 파싱/분류 스레드 (형건우)
-// #include "thread_analyzer.h" // 융합/위협 분석 스레드 (형건우)
-// #include "thread_response.h"  // 후처리/로깅 스레드 (김선권)
+#include "common.h"           // 공용 구조체
+#include "ts_packet_queue.h"    // Packet Queue
+// #include "ts_alert_queue.h"     // Alert Queue
+#include "thread_capture.h"     // libpcap 캡처 스레드
+#include "thread_parser.h"   // 파싱/분류 스레드
+#include "sessionManager.h"
+// #include "thread_analyzer.h" // 융합/위협 분석 스레드
+// #include "thread_response.h"  // 후처리/로깅 스레드
+#include "shm_ipc.h" // IPS -> IDS rawpacket 전송을 위한 공유 메모리 구조체 정의 헤더 include
 
 // 전역 서버 소켓(== server_sock) -> 클라이언트 연결 관리/종료 시
 int server_sock_global;
@@ -27,6 +28,7 @@ pthread_mutex_t client_sockets_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // 스레드 간 데이터 통로인 큐
 PacketQueue packetQueue;
+SessionManager sessionManager;
 // AlertQueue alertQueue;
 
 // 프로그램의 종료를 제어하기 위한 플래그
@@ -64,7 +66,8 @@ int main(int argc, char *argv[]) {
     };
 
     // 워커 스레드 선언
-    pthread_t /*nfqueue_tid, */capture_tid /*, parser_tid, analyzer_tid, response_tid*/;
+    pthread_t /*nfqueue_tid, */capture_tid , parser_tid 
+    /*, analyzer_tid, response_tid*/;
     pthread_t connection_tid; // 클라이언트 연결 수락용 스레드
 
     printf("IDS 워커 스레드 생성 중...\n");
@@ -82,12 +85,12 @@ int main(int argc, char *argv[]) {
     }
     printf(" -> [OK] 2-1. libpcap 캡처 스레드가 생성되었습니다.\n");
     
-    /*
+    
     if (pthread_create(&parser_tid, NULL, parser_thread_main, &common_args) != 0) {
         perror("파싱/분류 스레드 생성 실패"); exit(EXIT_FAILURE);
     }
     printf(" -> [OK] 2-2. 파싱/분류 스레드가 생성되었습니다.\n");
-    */
+    
 
     /*
     if (pthread_create(&analyzer_tid, NULL, analyzer_thread_main, &common_args) != 0) {
@@ -102,6 +105,10 @@ int main(int argc, char *argv[]) {
     }
     printf(" -> [OK] 2-4. 후처리/로깅 스레드가 생성되었습니다.\n");
     */
+
+    // start : IDS 프로세스에서 IPS 에서 보내는 raw packet 받기
+
+    // end : IDS 프로세스에서 IPS 에서 보내는 raw packet 받기
 
     // 클라이언트 연결 수락 스레드 생성
     if (pthread_create(&connection_tid, NULL, client_connection_thread, (void*)&is_running) != 0) {

@@ -48,6 +48,7 @@ void tsPacketqPush(PacketQueue* q, RawPacket* packet) {
     }
     q->count++;
 
+    // printf("[Queue] PUSHED! count = %d. Signaling consumer.\n", q->count);
     // 큐가 비어있어서 잠들어 있을 수 있는 소비(ex. 파싱 스레드) 스레드를 깨움
     pthread_cond_signal(&q->cond);
 
@@ -59,15 +60,21 @@ void tsPacketqPush(PacketQueue* q, RawPacket* packet) {
 RawPacket* tsPacketqPop(PacketQueue* q) {
     if (q == NULL) return NULL;
 
+    // printf("[Queue] POP trying to lock. count = %d\n", q->count);
+
     // 임계 구역 시작
     pthread_mutex_lock(&q->lock);
 
+    // printf("[Queue] POP waiting on condition...\n");
     // 큐가 비어있고, 프로그램이 계속 실행 중이면, 데이터가 들어올 때까지 대기
     while (q->head == NULL && *(q->isRunning)) {
         // pthread_cond_wait은 뮤텍스를 잠시 풀고 대기 상태에 들어감.
         // 다른 스레드가 pthread_cond_signal/broadcast를 호출하면 깨어나면서 다시 뮤텍스를 잡음.
         pthread_cond_wait(&q->cond, &q->lock);
     }
+
+    printf("[Queue] POP woke up! is_running=%d, head is %s\n", 
+           *(q->isRunning), (q->head == NULL ? "NULL" : "NOT NULL"));
 
     // 루프를 빠져나온 이유가 프로그램 종료 신호 때문인지 확인
     if (*(q->isRunning) == 0 && q->head == NULL) {

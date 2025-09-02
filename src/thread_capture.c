@@ -40,10 +40,10 @@ void packet_handler(u_char* args, const struct pcap_pkthdr* header, const u_char
     }
 
     // queue input 개수 체크
-    printf("[PacketQueue_개수] : %d\n", queue->count);
+    // printf("[PacketQueue_개수] : %d\n", queue->count);
 
     // (2주차 목표) 일단 수신된 패킷을 간단한 출력
-    printf("[캡처 스레드] Packet captured, length: %d\n", header->len);
+    // printf("[캡처 스레드] Packet captured, length: %d\n", header->len);
 }
 
 // pcap_thread_main 스레드 함수
