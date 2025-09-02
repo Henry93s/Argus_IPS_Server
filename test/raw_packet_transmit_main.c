@@ -7,6 +7,8 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <signal.h>
+#include <stdint.h>
 #include "../src/rawPacket.h"  // RawPacket 정의
 #include "../src/shm_ipc.h" // SharedPacketBuffer 정의
 

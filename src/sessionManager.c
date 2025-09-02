@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <signal.h>
 #include "sessionManager.h"
 
 static unsigned int hashFunction(uint32_t srcIp, uint16_t srcPort, uint32_t dstIp, uint16_t dstPort);

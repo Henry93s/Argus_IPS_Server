@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 #include <arpa/inet.h>
+#include <signal.h>
 #include "common.h"
 #include "ts_packet_queue.h"
 #include "sessionManager.h"
@@ -38,6 +39,7 @@ void* parser_thread_main(void* args) {
             // continue;
             break;
         }
+        // if(*isRunning == 0) break;
 
         printf("[Parser Thread DEBUG] Popped a packet, len: %u\n", raw_packet->len);
 

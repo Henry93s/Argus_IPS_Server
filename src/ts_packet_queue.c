@@ -1,6 +1,7 @@
 // ts_packet_queue.c
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include "ts_packet_queue.h"
 
 // 큐를 초기화하는 함수

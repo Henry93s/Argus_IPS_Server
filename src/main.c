@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <signal.h>
 
 #include "common.h"           // 공용 구조체
 #include "ts_packet_queue.h"    // Packet Queue
@@ -224,7 +225,29 @@ void handle_shutdown_signal(int signal) {
     }
 
     // 클라이언트 수신 스레드 깨우기
+    /*
     if(server_sock_global != -1){
+        close(server_sock_global);
+        server_sock_global = -1;
+    }
+    */
+    if(server_sock_global != -1){
+        int dummy_sock = socket(PF_INET, SOCK_STREAM, 0);
+        if (dummy_sock != -1) {
+            struct sockaddr_in server_addr;
+            memset(&server_addr, 0, sizeof(server_addr));
+            server_addr.sin_family = AF_INET;
+            server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+            server_addr.sin_port = htons(8085); // 서버가 리슨하는 포트와 동일
+            
+            // 접속 시도 (성공하든 실패하든 상관없음, accept()를 깨우는 것이 목적)
+            connect(dummy_sock, (struct sockaddr*)&server_addr, sizeof(server_addr));
+            
+            // 임시 소켓은 바로 닫음
+            close(dummy_sock);
+        }
+        // 그 후에 서버 소켓을 닫아도 늦지 않음.
+        shutdown(server_sock_global, SHUT_RDWR); // 더 우아한 종료
         close(server_sock_global);
         server_sock_global = -1;
     }

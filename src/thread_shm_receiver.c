@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdint.h>
 #include "ts_packet_queue.h"
 #include "shm_ipc.h" // 공유 메모리 구조체 정의 포함
 #include "thread_shm_receiver.h"
