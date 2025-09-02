@@ -105,12 +105,30 @@ RawPacket* tsPacketqPop(PacketQueue* q) {
 void tsPacketqDestroy(PacketQueue* q) {
     if (q == NULL) return;
 
-    // 큐에 남아있는 모든 노드와 패킷 데이터를 해제
-    RawPacket* packet;
-    while ((packet = tsPacketqPop(q)) != NULL) {
-        free(packet->data);
-        free(packet);
+    // 먼저 큐를 잠그고, 다른 스레드가 접근하지 못하도록 함
+    pthread_mutex_lock(&q->lock);
+
+    PacketNode* current = q->head;
+    while (current != NULL) {
+        PacketNode* to_free_node = current;
+        // RawPacket* to_free_packet = current->packet;
+        current = current->next;
+
+        // if (to_free_packet) {
+            // free(to_free_packet->data); // RawPacket 구조가 배열이므로 이 줄은 필요 없음
+            // free(to_free_packet);
+        // }
+        if (to_free_node->packet) {
+            fprintf(stderr, "Warning: A packet was left in the queue and will leak memory.\n");
+        }
+        free(to_free_node);
     }
+    
+    q->head = NULL;
+    q->tail = NULL;
+    q->count = 0;
+
+    pthread_mutex_unlock(&q->lock);
 
     // 뮤텍스와 조건 변수 파괴
     pthread_mutex_destroy(&q->lock);

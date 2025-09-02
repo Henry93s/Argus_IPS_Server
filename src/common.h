@@ -1,6 +1,7 @@
 #ifndef COMMON_H
 #define COMMON_H
-#include "rowPacket.h"
+#include "rawPacket.h"
+#include "shm_ipc.h"
 
 // packetQueue.h - start
 
@@ -75,6 +76,7 @@ typedef struct {
     // AlertQueue* alertQueue;
     SessionManager* sessionManager;
     volatile sig_atomic_t* isRunning;
+    SharedPacketBuffer* sharedBuffer;
 } ThreadArgs;
 
 #pragma pack(push, 1)

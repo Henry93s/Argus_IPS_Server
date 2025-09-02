@@ -11,7 +11,8 @@
 #include "common.h"           // 공용 구조체
 #include "ts_packet_queue.h"    // Packet Queue
 // #include "ts_alert_queue.h"     // Alert Queue
-#include "thread_capture.h"     // libpcap 캡처 스레드
+#include "thread_capture.h"     // libpcap 캡처 스레드 (IPS 로부터 공유 메모리를 통해 패킷을 수신하므로 이제 단순 테스트/분석 디버깅 용임)
+#include "thread_shm_receiver.h" // 캡처 스레드 대신에 shm(공유 메모리) 수신 스레드 헤더를 포함
 #include "thread_parser.h"   // 파싱/분류 스레드
 #include "sessionManager.h"
 // #include "thread_analyzer.h" // 융합/위협 분석 스레드
@@ -34,6 +35,11 @@ SessionManager sessionManager;
 // 프로그램의 종료를 제어하기 위한 플래그
 volatile sig_atomic_t is_running = 1;
 
+// 공유 메모리 포인터
+SharedPacketBuffer* sharedBuffer_global = NULL;
+// 공유 메모리 파일 디스크립터
+int shm_fd_global = -1;
+
 // 함수 프로토타입들 (하단 정의 확인)
 void handle_shutdown_signal(int signal);
 // ... 클라이언트 연결을 수락하는 스레드 함수
@@ -51,8 +57,55 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, handle_shutdown_signal);
     signal(SIGTERM, handle_shutdown_signal);
 
+    // start -- 공유 메모리 초기화
+    printf("공유 메모리 설정 중...\n");
+    // 0. 기존 공유 메모리 객체를 먼저 제거함 (잔여 파일 에러 방지)
+    shm_unlink(SHM_NAME);
+
+    // 1. 공유 메모리 객체 생성/열기
+    shm_fd_global = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
+    if(shm_fd_global == -1){
+        perror("shm_open 실패");
+        exit(EXIT_FAILURE);
+    }
+    // 2. 공유 메모리 크기 설정
+    if(ftruncate(shm_fd_global, sizeof(SharedPacketBuffer)) == -1) {
+        perror("ftruncate 실패");
+        exit(EXIT_FAILURE);
+    }
+    // 3. 메모리 매핑
+    sharedBuffer_global = (SharedPacketBuffer*)mmap(0, sizeof(SharedPacketBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_global, 0);
+    if(sharedBuffer_global == MAP_FAILED){
+        perror("mmap 실패");
+        exit(EXIT_FAILURE);
+    }
+    // 4. 공유 동기화 객체 ini
+    // 뮤텍스와 조건 변수의 속성을 담을 객체
+    pthread_mutexattr_t mattr;
+    pthread_condattr_t cattr;
+    // 속성 구조체를 초기화
+    pthread_mutexattr_init(&mattr);
+    pthread_condattr_init(&cattr);
+    // 다른 스포레스 간 공유가 가능하도록 PTHREAD_PROCESS_SHARED 설정
+    pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+    pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED);
+    // 실제 공유 메모리에 올라가 있는 구조체 sharedBuffer_global 내부 동기화 객체들을 초기화
+    pthread_mutex_init(&sharedBuffer_global->lock, &mattr);
+    pthread_cond_init(&sharedBuffer_global->cond_read, &cattr);
+    pthread_cond_init(&sharedBuffer_global->cond_write, &cattr);
+    // 더 이상 필요 없는 attribute 객체 정리
+    pthread_mutexattr_destroy(&mattr);
+    pthread_condattr_destroy(&cattr);
+    // 버퍼 상태 초기화
+    sharedBuffer_global->count = 0;
+    sharedBuffer_global->read_idx = 0;
+    sharedBuffer_global->write_idx = 0;
+    printf("공유 메모리 초기화 완료\n");
+    // -- end 공유 메모리 초기화
+
     // 공유 자원 초기화
     tsPacketqInit(&packetQueue, &is_running);
+    // smInit 은 thread_parser.c 에서 수행함 !
     // tsAlertqInit(&alertQueue, &is_running);
     memset(client_sockets, 0, sizeof(client_sockets));
     printf("공유 자원 초기화 완료.\n");
@@ -60,38 +113,41 @@ int main(int argc, char *argv[]) {
     // 스레드에 전달할 인자 준비
     // 각 스레드에서 common_args 를 받고 ex. args->packetqueue 와 같은 방식으로 사용
     ThreadArgs common_args = { 
-        .packetQueue = &packetQueue, 
+        .packetQueue = &packetQueue,
+        .sessionManager = &sessionManager,
+        .sharedBuffer = sharedBuffer_global, // 공유 메모리 포인터 전달
         // .alertQueue = &alertQueue,
         .isRunning = &is_running
     };
 
     // 워커 스레드 선언
-    pthread_t /*nfqueue_tid, */capture_tid , parser_tid 
+    pthread_t /*nfqueue_tid, */capture_tid , parser_tid, shm_receiver_tid
     /*, analyzer_tid, response_tid*/;
     pthread_t connection_tid; // 클라이언트 연결 수락용 스레드
 
     printf("IDS 워커 스레드 생성 중...\n");
 
-    // 스레드 생성 확인을 위한 출력 추가
+    // libpcap 캡처 스레드 생성 코드 부분 (테스트용)
     /*
-    if (pthread_create(&nfqueue_tid, NULL, nfqueue_thread_main, &common_args) != 0) {
-        perror("NFQUEUE 수신 스레드 생성 실패"); exit(EXIT_FAILURE);
-    }
-    printf(" -> [OK] 1-1. NFQUEUE 수신 스레드가 생성되었습니다.\n");
+        if (pthread_create(&capture_tid, NULL,  pcap_thread_main, &common_args) != 0) {
+            perror("libpcap 캡처 스레드 생성 실패"); exit(EXIT_FAILURE);
+        }
+        printf(" -> [OK] 2-1. libpcap 캡처 스레드가 생성되었습니다.\n");
     */
 
-    if (pthread_create(&capture_tid, NULL, pcap_thread_main, &common_args) != 0) {
-        perror("libpcap 캡처 스레드 생성 실패"); exit(EXIT_FAILURE);
+    // 캡처 스레드 대신 공유 메모리 수신 스레드 생성
+    if(pthread_create(&shm_receiver_tid, NULL, shm_receiver_thread_main, &common_args) != 0){
+        perror("공유 메모리 수신 스레드 생성 실패");
+        exit(EXIT_FAILURE);
     }
-    printf(" -> [OK] 2-1. libpcap 캡처 스레드가 생성되었습니다.\n");
-    
-    
+    printf(" -> [OK] 2-1. 공유 메모리 수신 스레드가 생성되었습니다.\n");
+
+
     if (pthread_create(&parser_tid, NULL, parser_thread_main, &common_args) != 0) {
         perror("파싱/분류 스레드 생성 실패"); exit(EXIT_FAILURE);
     }
     printf(" -> [OK] 2-2. 파싱/분류 스레드가 생성되었습니다.\n");
     
-
     /*
     if (pthread_create(&analyzer_tid, NULL, analyzer_thread_main, &common_args) != 0) {
         perror("융합/위협 분석 스레드 생성 실패"); exit(EXIT_FAILURE);
@@ -106,10 +162,6 @@ int main(int argc, char *argv[]) {
     printf(" -> [OK] 2-4. 후처리/로깅 스레드가 생성되었습니다.\n");
     */
 
-    // start : IDS 프로세스에서 IPS 에서 보내는 raw packet 받기
-
-    // end : IDS 프로세스에서 IPS 에서 보내는 raw packet 받기
-
     // 클라이언트 연결 수락 스레드 생성
     if (pthread_create(&connection_tid, NULL, client_connection_thread, (void*)&is_running) != 0) {
         perror("클라이언트 연결 관리 스레드 생성 실패"); exit(EXIT_FAILURE);
@@ -119,10 +171,12 @@ int main(int argc, char *argv[]) {
     printf("\n모든 스레드가 정상적으로 생성되었습니다. Argus가 활성화되었습니다.\n");
     printf("Ctrl+C를 입력하면 종료됩니다.\n");
     
-    // 스레드 종료 대기
-    // pthread_join(nfqueue_tid, NULL);
+    pthread_join(shm_receiver_tid, NULL);
+    // (test용 캡처 스레드)
+    /*
     pthread_join(capture_tid, NULL);
-    // pthread_join(parser_tid, NULL);
+    */
+    pthread_join(parser_tid, NULL);
     // pthread_join(analyzer_tid, NULL);
     // pthread_join(response_tid, NULL);
     pthread_join(connection_tid, NULL);
@@ -130,8 +184,16 @@ int main(int argc, char *argv[]) {
     // 공유 자원 해제
     printf("\n모든 스레드가 종료되었습니다. 할당한 자원을 해제합니다...\n");
     tsPacketqDestroy(&packetQueue);
+    // smDestroy 는 thread_parser.c 에서 수행함 !
     // tsAlertqDestroy(&alertQueue);
     pthread_mutex_destroy(&client_sockets_mutex);
+    
+    // 공유 메모리 해제
+    munmap(sharedBuffer_global, sizeof(SharedPacketBuffer));
+    close(shm_fd_global);
+    // 시스템에서 공유 메모리 객체 제거
+    shm_unlink(SHM_NAME);
+
     printf("종료 완료.\n");
 
     return 0;
@@ -143,13 +205,25 @@ void handle_shutdown_signal(int signal) {
     printf("\n종료 시그널을 수신했습니다. 모든 스레드를 안전하게 종료합니다...\n");
     is_running = 0;
     
+    // 캡처 스레드 있을 때 테스트용
+    /*
     // 캡처 스레드 캡처 루프(dispatcher) 중단
     capture_request_stop();
+    */
 
     // 큐에서 대기 중인 스레드를 깨우기 위한 추가 조치
     tsPacketqSignalExit(&packetQueue);
     // tsAlertqSignalExit(&alertQueue);
 
+    // 공유 메모리 수신 스레드 깨우기
+    if (sharedBuffer_global != NULL) {
+        pthread_mutex_lock(&sharedBuffer_global->lock);
+        pthread_cond_broadcast(&sharedBuffer_global->cond_read);
+        pthread_cond_broadcast(&sharedBuffer_global->cond_write);
+        pthread_mutex_unlock(&sharedBuffer_global->lock);
+    }
+
+    // 클라이언트 수신 스레드 깨우기
     if(server_sock_global != -1){
         close(server_sock_global);
         server_sock_global = -1;
