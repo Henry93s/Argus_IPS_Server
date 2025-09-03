@@ -121,8 +121,6 @@ void* parser_thread_main(void* args) {
 
         // --- 7. 원본 RawPacket 메모리 해제 ---
         // free(raw_packet->data);
-        
-        // 실험 1
         free(raw_packet);
     }
     

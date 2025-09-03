@@ -34,6 +34,7 @@ SessionManager sessionManager;
 // AlertQueue alertQueue;
 
 // 프로그램의 종료를 제어하기 위한 플래그
+// volatile sig_atomic_t : 시그널 핸들러에서 사용하는 공유 변수를 안전하게 조작
 volatile sig_atomic_t is_running = 1;
 
 // 공유 메모리 포인터
