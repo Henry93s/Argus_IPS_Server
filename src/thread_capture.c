@@ -1,3 +1,4 @@
+// (hyungoo)
 #define _DEFAULT_SOURCE
 #include <sys/types.h>
 #include <stdint.h>
@@ -58,6 +59,9 @@ static void packet_handler(unsigned char* args, const struct pcap_pkthdr* header
     // 캡처된 패킷 데이터를 PacketQueue에 넣음
     // pkt_data는 pcap 내부 버퍼 이므로
     // 다른 스레드에서 안전하게 사용하기 위해 데이터를 복사해서 넣음
+    // caplen 0 defence
+    if (!header || header->caplen==0) return;
+
     RawPacket* new_packet = (RawPacket*)malloc(sizeof(RawPacket));
     if (!new_packet) return;
 
@@ -71,7 +75,7 @@ static void packet_handler(unsigned char* args, const struct pcap_pkthdr* header
     tsPacketqPush(queue, new_packet);
 
     // queue size logging
-    printf("[IDS nflog:5] : enqueued packet, queue size=%d, caplen=%u\n", queue->count, header->caplen);
+    printf("[IDS nflog:5] enqueue: caplen=%u, qsize=%d\n", header->caplen, queue->count);
 }
 /*
     // (2주차 목표) 일단 수신된 패킷을 간단한 출력
@@ -104,9 +108,15 @@ void* pcap_thread_main(void* args) {
     }
     g_pcap_handle = adhandle;
 
-    pcap_set_snaplen(adhandle, 262144);
+    pcap_set_snaplen(adhandle, 1600);
     pcap_set_promisc(adhandle, 0);
     pcap_set_timeout(adhandle, 100);
+
+#ifdef PCAP_ERROR
+#endif
+#ifdef HAVE_PCAP_SET_IMMEDIATE_MODE
+    pcap_set_immediate_mode(adhandle,1); // latency decrease
+#endif
     pcap_set_buffer_size(adhandle, 4<<20);
 
     if (pcap_activate(adhandle) < 0) {
@@ -116,7 +126,7 @@ void* pcap_thread_main(void* args) {
         return NULL;
     }
 
-    // DLT nflog
+    // DLT nflog checking
     int dlt = pcap_datalink(adhandle);
     if (dlt != DLT_NFLOG) {
         fprintf(stderr, "warning: DLT=%d (expected DLT_nflog)\n", dlt);
@@ -128,7 +138,11 @@ void* pcap_thread_main(void* args) {
         int rc = pcap_dispatch(adhandle, -1, packet_handler, (unsigned char*)queue);
         if (rc == -2) break; // break loop
         if (rc < 0) {
-            fprintf(stderr, "pcap_dispatch rc=%d err=%s\n", rc, pcap_geterr(adhandle));
+            const char* perr=pcap_geterr(adhandle);
+            fprintf(stderr, "pcap_dispatch rc=%d err=%s\n", rc, perr ? perr : "(null)");
+            if(perr&&strstr(perr,"Message truncated")) {
+                continue;
+            }
             break;
         }
         // rc == 0; timeout -> continue

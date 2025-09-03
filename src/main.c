@@ -13,6 +13,7 @@
 #include "ts_packet_queue.h"    // Packet Queue (형건우)
 // #include "ts_alert_queue.h"     // Alert Queue (김선권)
 #include "thread_capture.h"     // libpcap 캡처 스레드 (형건우)
+#include "shm_consumer.h" // shared memory consumer (최현구)
 // #include "thread_nfqueue.h"     // NFQUEUE 수신 스레드 (최현구)
 // #include "thread_parser.h"   // 파싱/분류 스레드 (형건우)
 // #include "thread_analyzer.h" // 융합/위협 분석 스레드 (형건우)
@@ -36,7 +37,7 @@ static ssize_t write_all(int fd, const void* buf, size_t len) {
 }
 
 // 전역 서버 소켓(== server_sock) -> 클라이언트 연결 관리/종료 시
-int server_sock_global;
+int server_sock_global = -1; // +init
 
 // 클라이언트 연결 관리를 위한 전역 변수
 #define MAX_CLIENTS 10
@@ -60,6 +61,7 @@ void* handle_client_comm(void* arg);
 
 // main 함수
 int main(int argc, char *argv[]) {
+    (void)argc; (void)argv;
     
     printf("Argus IPS 초기화 진행 중...\n");
 
@@ -72,6 +74,12 @@ int main(int argc, char *argv[]) {
     // tsAlertqInit(&alertQueue, &is_running);
     memset(client_sockets, 0, sizeof(client_sockets));
     printf("공유 자원 초기화 완료.\n");
+
+    // SHM event consumer thread start! (IPS->IDS 텔레메트리 수신)
+    if (shm_consumer_start() != 0) {
+        perror("SHM 소비 스레드 시작 실패");
+        // exit(EXIT_FAILURE);
+    }
 
     // 스레드에 전달할 인자 준비
     // 각 스레드에서 common_args 를 받고 ex. args->packetqueue 와 같은 방식으로 사용
@@ -151,6 +159,7 @@ int main(int argc, char *argv[]) {
 
 // 시그널 핸들러 함수
 void handle_shutdown_signal(int signal) {
+    (void)signal;
     printf("\n종료 시그널을 수신했습니다. 모든 스레드를 안전하게 종료합니다...\n");
     is_running = 0;
     
@@ -186,11 +195,9 @@ void* handle_client_comm(void* arg) {
 
         // 명령 처리 후 응답처리 (간단하게 일단.. 첫 싲ㅏㄱ이므로 !)
 
-        {
-            const char* msg = "명령 수신 완료\n";
-            if (write_all(client_sock, msg, strlen(msg)) < 0) {
-                perror("write_all");
-            }
+        const char* msg = "명령 수신 완료\n";
+        if (write_all(client_sock, msg, strlen(msg)) < 0) {
+            perror("write_all");
         }
 
 //        (void)write(client_sock, "명령 수신 완료\n", strlen("명령 수신 완료\n"));
@@ -244,6 +251,7 @@ void* client_connection_thread(void* arg) {
     if (listen(server_sock, 5) == -1) {
         perror("서버 소켓 리슨 실패");
         close(server_sock);
+        server_sock_global=-1;
         return NULL;
     }
 
@@ -278,7 +286,7 @@ void* client_connection_thread(void* arg) {
             // 통신을 전담할 새로운 스레드를 생성
             pthread_t tid;
             int* client_sock_ptr = (int*)malloc(sizeof(int));
-            if (client_sock_ptr == NULL) {
+            if (!client_sock_ptr || client_sock_ptr == NULL) {
                 perror("메모리 할당 실패");
                 close(client_sock);
                 continue;
@@ -295,10 +303,8 @@ void* client_connection_thread(void* arg) {
         } else {
             printf("클라이언트 수용량 초과. 연결을 거부합니다.\n");
 
-            {
-                const char* full = "서버가 가득찼습니다.\n";
-                (void)write_all(client_sock, full, strlen(full));
-            }
+            const char* full = "서버가 가득찼습니다.\n";
+            (void)write_all(client_sock, full, strlen(full));
 
 //            (void)write(client_sock, "서버가 가득 찼습니다.\n", strlen("서버가 가득 찼습니다.\n"));
             close(client_sock);
@@ -306,6 +312,7 @@ void* client_connection_thread(void* arg) {
     }
 
     close(server_sock);
+    server_sock_global=-1;
 
     printf("클라이언트 연결 관리 스레드가 종료됩니다.\n");
     return NULL;
