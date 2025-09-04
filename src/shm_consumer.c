@@ -4,8 +4,8 @@
 #include <time.h>
 #include <pthread.h>
 #include <stdio.h>
-#include "shm_ipc.h"
-#include "ips_event.h"
+#include "../common_hyungoo/shm_ipc.h"
+#include "../common_hyungoo/ips_event.h"
 #include "ids_log.h"
 
 static shm_ipc_t g_ipc;

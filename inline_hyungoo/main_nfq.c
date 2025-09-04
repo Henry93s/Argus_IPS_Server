@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <semaphore.h> // sem_unlink
 #include <sys/mman.h> // shm_unlink
-#include "shm_ipc.h"
+#include "../common_hyungoo/shm_ipc.h"
 
 #include "nfq_iface.h"
 #include "ruleset.h"

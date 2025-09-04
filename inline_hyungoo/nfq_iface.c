@@ -1,8 +1,8 @@
 #include "nfq_iface.h"
 #include "packet_utils.h"
 #include "ruleset.h"
-#include "shm_ipc.h"
-#include "ips_event.h"
+#include "../common_hyungoo/shm_ipc.h"
+#include "../common_hyungoo/ips_event.h"
 
 #include <stdio.h>
 #include <stdlib.h>

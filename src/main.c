@@ -167,12 +167,13 @@ int main(int argc, char *argv[]) {
     */
 
     // 캡처 스레드 대신 공유 메모리 수신 스레드 생성
+    /*
     if(pthread_create(&shm_receiver_tid, NULL, shm_receiver_thread_main, &common_args) != 0){
         perror("공유 메모리 수신 스레드 생성 실패");
         exit(EXIT_FAILURE);
     }
     printf(" -> [OK] 2-1. 공유 메모리 수신 스레드가 생성되었습니다.\n");
-
+    */
 
     if (pthread_create(&parser_tid, NULL, parser_thread_main, &common_args) != 0) {
         perror("파싱/분류 스레드 생성 실패"); exit(EXIT_FAILURE);
