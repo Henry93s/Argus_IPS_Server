@@ -1,11 +1,9 @@
 #ifndef COMMON_H
 #define COMMON_H
+#include "rawPacket.h"
+#include "shm_ipc.h"
 
-// rawpacket 구조체 정의
-typedef struct {
-    unsigned char* data;
-    unsigned int len;
-} RawPacket;
+// packetQueue.h - start
 
 // 큐의 각 노드를 나타내는 구조체
 typedef struct PacketNode {
@@ -28,12 +26,57 @@ typedef struct {
     // 프로그램 종료 신호를 받기 위한 포인터
     volatile sig_atomic_t* isRunning;
 } PacketQueue;
+// packetQueue.h - end
+
+// sessionManager.h - Start
+#define HASH_TABLE_SIZE 65536
+typedef enum {
+    TCP_STATE_NONE,
+    TCP_SYN_SENT,
+    TCP_ESTABLISHED,
+    TCP_FIN_WAIT,
+    TCP_CLOSED
+} TcpState;
+typedef struct TCPFragment {
+    uint32_t seq;
+    uint32_t len;
+    unsigned char* data;
+    struct TCPFragment* next;
+} TCPFragment;
+typedef struct SessionInfo {
+    uint32_t srcIp;
+    uint32_t dstIp;
+    uint16_t srcPort;
+    uint16_t dstPort;
+    TcpState state;
+    time_t startTime;
+    time_t lastActiveTime;
+    long fwdPacketCount;
+    long bwdPacketCount;
+    long fwdTotalBytes;
+    long bwdTotalBytes;
+    uint32_t nextFwdSeq;
+    uint32_t nextBwdSeq;
+    TCPFragment* fwdFragments;
+    TCPFragment* bwdFragments;
+    struct SessionInfo* next;
+} SessionInfo;
+typedef struct SessionManager {
+    SessionInfo* buckets[HASH_TABLE_SIZE];
+    pthread_mutex_t lock;
+    long activeSessions;
+} SessionManager;
+
+// sessionManager.h -- End
+
 
 // 각 스레드에 필요한 자원들의 포인터를 담는 구조체
 typedef struct {
     PacketQueue* packetQueue;
     // AlertQueue* alertQueue;
+    SessionManager* sessionManager;
     volatile sig_atomic_t* isRunning;
+    SharedPacketBuffer* sharedBuffer;
 } ThreadArgs;
 
 #pragma pack(push, 1)
