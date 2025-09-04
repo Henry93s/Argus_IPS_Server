@@ -159,23 +159,29 @@ int run_nfq(uint16_t qnum) {
     if (!h) return 1;
 
     const int fd = nfq_fd(h);
+    int rv;
     char buf[65536];
 
     printf("[NFQ] listening on queue %u (Ctrl+C to stop)\n", (unsigned)qnum);
 
     while (g_run) {
-        int r=recv(fd, buf, sizeof(buf), 0);
-        if (r>=0){
-            nfq_handle_packet(h,buf,r);
-            continue;
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(fd, &fds);
+        
+        struct timeval tv = {1, 0}; // 1초 timeout
+        int ret = select(fd+1, &fds, NULL, NULL, &tv);
+        
+        if (ret > 0 && FD_ISSET(fd, &fds)) {
+            rv = recv(fd, buf, sizeof(buf), 0);
+            if (rv >= 0) nfq_handle_packet(h, buf, rv);
+        } else if (ret < 0 && errno != EINTR) {
+            perror("select");
+            break;
         }
-        if(errno==EINTR || errno==EAGAIN) {
-            if(!g_run) break; // signal -> termination
-            continue; // pause -> continue
-        }
-        perror("recv");
-        break;
+        // ret == 0 (timeout): 그냥 루프 돌면서 g_run 체크
     }
+
     nfq_teardown(h,qh);
     printf("[NFQ] bye\n");
     return 0;

@@ -13,7 +13,7 @@ int shm_ipc_open(shm_ipc_t* ipc, int create){
 
     // SHM open
     int oflag=O_RDWR | (create ? O_CREAT : 0);
-    int fd=shm_open(ARGUS_SHM_NAME, oflag, 0600);
+    int fd=shm_open(ARGUS_SHM_NAME, oflag, 0666);
     if(fd<0) return -1;
 
     // 크기 지정, 생성 시 ftruncate
