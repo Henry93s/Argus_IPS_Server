@@ -12,7 +12,12 @@
 #include "common.h"
 #include "ts_packet_queue.h"
 #include "thread_capture.h"
-
+#include "rawPacket.h"
+/*
+#ifndef IDS_PCAP_SNAPLEN
+#define IDS_PCAP_SNAPLEN 1600
+#endif
+*/
 // pcap handle 저장 전역 변수
 static pcap_t* g_pcap_handle = NULL;
 
@@ -21,7 +26,34 @@ void capture_request_stop(void){
         pcap_breakloop(g_pcap_handle);
     }
 }
+/*
+// PacketQueue(u_char*) 를 인자로 받는 콜백 함수
+static void packet_handler(unsigned char* args, const struct pcap_pkthdr* header, const unsigned char* pkt_data) {
+    // u_char* 를 PacketQueue*로 변환
+    PacketQueue* queue = (PacketQueue*)args;
 
+    // 캡처된 패킷 데이터를 PacketQueue에 넣음
+    // pkt_data는 pcap 내부 버퍼 이므로
+    // 다른 스레드에서 안전하게 사용하기 위해 데이터를 복사해서 넣음
+    // caplen 0 defence
+    if (!header || header->caplen==0) return;
+
+    RawPacket* new_packet = (RawPacket*)malloc(sizeof(RawPacket));
+    if (!new_packet) return;
+
+    new_packet->data = (unsigned char*)malloc(header->caplen);
+    if (!new_packet->data) { free(new_packet); return; }
+
+    memcpy(new_packet->data, pkt_data, header->caplen);
+    new_packet->len = header->caplen;
+    
+    // 큐에 푸시
+    tsPacketqPush(queue, new_packet);
+
+    // queue size logging
+    printf("[IDS nflog:5] enqueue: caplen=%u, qsize=%d\n", header->caplen, queue->count);
+}
+*/
 /*
 void packet_handler(u_char* args, const struct pcap_pkthdr* header, const u_char* pkt_data) {
     // u_char* 를 PacketQueue*로 변환
@@ -68,23 +100,27 @@ static void packet_handler(unsigned char* args, const struct pcap_pkthdr* header
     // pkt_data는 pcap 내부 버퍼 이므로
     // 다른 스레드에서 안전하게 사용하기 위해 데이터를 복사해서 넣음
     // caplen 0 defence
-    if (!header || header->caplen==0) return;
+//    if (!header || header->caplen==0) return;
 
     RawPacket* new_packet = (RawPacket*)malloc(sizeof(RawPacket));
     if (!new_packet) return;
 
-    new_packet->data = (unsigned char*)malloc(header->caplen);
-    if (!new_packet->data) { free(new_packet); return; }
+    unsigned int cap = header->caplen;
+    if (cap > MAX_PACKET_SIZE) cap = MAX_PACKET_SIZE;
 
-    memcpy(new_packet->data, pkt_data, header->caplen);
-    new_packet->len = header->caplen;
+//    new_packet->data = (unsigned char*)malloc(header->caplen);
+//    if (!new_packet->data) { free(new_packet); return; }
+
+    memcpy(new_packet->data, pkt_data, cap);
+    new_packet->len = cap;
     
     // 큐에 푸시
     tsPacketqPush(queue, new_packet);
 
     // queue size logging
-    printf("[IDS nflog:5] enqueue: caplen=%u, qsize=%d\n", header->caplen, queue->count);
+    printf("[IDS nflog:5] enqueue: caplen=%u, qsize=%d\n", new_packet->len, queue->count);
 }
+
 /*
     // (2주차 목표) 일단 수신된 패킷을 간단한 출력
     printf("[캡처 스레드] Packet captured, length: %d\n", header->len);

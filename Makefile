@@ -54,7 +54,12 @@ SRC_IDS = \
   $(SRC_DIR)/thread_capture.c \
   $(SRC_DIR)/ts_packet_queue.c \
   $(SRC_DIR)/shm_consumer.c \
-  $(SRC_DIR)/ids_log.c
+  $(SRC_DIR)/ids_log.c \
+  $(SRC_DIR)/linkedList.c \
+  $(SRC_DIR)/sessionManager.c \
+  $(SRC_DIR)/thread_parser.c \
+  $(SRC_DIR)/thread_shm_receiver.c \
+  $(SRC_DIR)/ts_alert_queue.c
 
 SRC_IPS = \
   $(INLINE_DIR)/main_nfq.c \
