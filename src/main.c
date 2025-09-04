@@ -21,7 +21,7 @@
 #include "sessionManager.h"
 // #include "thread_analyzer.h" // 융합/위협 분석 스레드
 // #include "thread_response.h"  // 후처리/로깅 스레드
-#include "shm_ipc.h" // IPS -> IDS rawpacket 전송을 위한 공유 메모리 구조체 정의 헤더 include
+#include "../common_hyungoo/shm_ipc.h" // IPS -> IDS rawpacket 전송을 위한 공유 메모리 구조체 정의 헤더 include
 
 // hyungoo start
 // warning message, helper func.
@@ -45,6 +45,7 @@ static ssize_t write_all(int fd, const void* buf, size_t len) {
 // 전역 서버 소켓(== server_sock) -> 클라이언트 연결 관리/종료 시
 int server_sock_global = -1; // +init
 
+
 // 클라이언트 연결 관리를 위한 전역 변수
 #define MAX_CLIENTS 10
 int client_sockets[MAX_CLIENTS];
@@ -61,6 +62,7 @@ volatile sig_atomic_t is_running = 1;
 
 // 공유 메모리 포인터
 SharedPacketBuffer* sharedBuffer_global = NULL;
+shm_ipc_t* g_ipc = NULL; // 전역 SHM Handle
 // 공유 메모리 파일 디스크립터
 int shm_fd_global = -1;
 
@@ -81,6 +83,7 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, handle_shutdown_signal);
 
     // start -- 공유 메모리 초기화
+    /*
     printf("공유 메모리 설정 중...\n");
     // 0. 기존 공유 메모리 객체를 먼저 제거함 (잔여 파일 에러 방지)
     shm_unlink(SHM_NAME);
@@ -92,12 +95,12 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
     // 2. 공유 메모리 크기 설정
-    if(ftruncate(shm_fd_global, sizeof(SharedPacketBuffer)) == -1) {
+    if(ftruncate(shm_fd_global, sizeof(ips_ring_t)) == -1) {
         perror("ftruncate 실패");
         exit(EXIT_FAILURE);
     }
     // 3. 메모리 매핑
-    sharedBuffer_global = (SharedPacketBuffer*)mmap(0, sizeof(SharedPacketBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_global, 0);
+    sharedBuffer_global = mmap(0, sizeof(ips_ring_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_global, 0);
     if(sharedBuffer_global == MAP_FAILED){
         perror("mmap 실패");
         exit(EXIT_FAILURE);
@@ -124,6 +127,7 @@ int main(int argc, char *argv[]) {
     sharedBuffer_global->read_idx = 0;
     sharedBuffer_global->write_idx = 0;
     printf("공유 메모리 초기화 완료\n");
+    */
     // -- end 공유 메모리 초기화
 
     // 공유 자원 초기화
@@ -132,14 +136,6 @@ int main(int argc, char *argv[]) {
     // tsAlertqInit(&alertQueue, &is_running);
     memset(client_sockets, 0, sizeof(client_sockets));
     printf("공유 자원 초기화 완료.\n");
-
-    // hyungoo start
-    // SHM event consumer thread start! (IPS->IDS 텔레메트리 수신)
-    if (shm_consumer_start() != 0) {
-        perror("SHM 소비 스레드 시작 실패");
-        // exit(EXIT_FAILURE);
-    }
-    // hyungoo end
 
     // 스레드에 전달할 인자 준비
     // 각 스레드에서 common_args 를 받고 ex. args->packetqueue 와 같은 방식으로 사용
@@ -150,6 +146,16 @@ int main(int argc, char *argv[]) {
         // .alertQueue = &alertQueue,
         .isRunning = &is_running
     };
+
+    // hyungoo start
+    // SHM event consumer thread start! (IPS->IDS 텔레메트리 수
+    printf("SHM 소비자 모듈 시작 중...\n");
+    if (shm_consumer_start(&common_args) != 0) {
+        perror("SHM 소비 스레드 시작 실패");
+        exit(EXIT_FAILURE);
+    }
+    printf("SHM 소비자 모듈 시작 완료.\n");
+    // hyungoo end
 
     // 워커 스레드 선언
     pthread_t /*nfqueue_tid, */capture_tid , parser_tid, shm_receiver_tid
@@ -203,7 +209,7 @@ int main(int argc, char *argv[]) {
     printf("\n모든 스레드가 정상적으로 생성되었습니다. Argus가 활성화되었습니다.\n");
     printf("Ctrl+C를 입력하면 종료됩니다.\n");
     
-    pthread_join(shm_receiver_tid, NULL);
+    // pthread_join(shm_receiver_tid, NULL);
     // (test용 캡처 스레드)
     /*
     pthread_join(capture_tid, NULL);
@@ -221,10 +227,11 @@ int main(int argc, char *argv[]) {
     pthread_mutex_destroy(&client_sockets_mutex);
     
     // 공유 메모리 해제
-    munmap(sharedBuffer_global, sizeof(SharedPacketBuffer));
-    close(shm_fd_global);
+    // munmap(sharedBuffer_global, sizeof(SharedPacketBuffer));
+    // close(shm_fd_global);
     // 시스템에서 공유 메모리 객체 제거
-    shm_unlink(SHM_NAME);
+    // shm_unlink(SHM_NAME);
+    shm_consumer_stop();
 
     printf("종료 완료.\n");
 

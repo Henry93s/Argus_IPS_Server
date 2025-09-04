@@ -73,7 +73,7 @@ static void packet_handler(unsigned char* args, const struct pcap_pkthdr* header
     RawPacket* new_packet = (RawPacket*)malloc(sizeof(RawPacket));
     if (!new_packet) return;
 
-    new_packet->data = (unsigned char*)malloc(header->caplen);
+    // new_packet->data = (unsigned char*)malloc(header->caplen);
     if (!new_packet->data) { free(new_packet); return; }
 
     memcpy(new_packet->data, pkt_data, header->caplen);

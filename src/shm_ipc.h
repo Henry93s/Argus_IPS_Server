@@ -8,7 +8,7 @@
 #include <semaphore.h>
 #include "rawPacket.h"
 
-#define SHM_NAME "/argus_shm"
+#define SHM_NAME "/argus_ips_ids_ring"
 #define PKT_MAX 512 // 공유 버퍼에 저장할 수 있는 최대 패킷 수
 
 // 공유 메모리 버퍼 구조체
