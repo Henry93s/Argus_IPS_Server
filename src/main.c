@@ -74,8 +74,6 @@ void* handle_client_comm(void* arg);
 
 // main 함수
 int main(int argc, char *argv[]) {
-    (void)argc; (void)argv;
-    
     printf("Argus IPS 초기화 진행 중...\n");
 
     // Ctrl+C, 프로세스 종료 시그널 수신 시ㄴ 핸들 함수 호출
