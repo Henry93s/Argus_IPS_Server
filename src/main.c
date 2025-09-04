@@ -7,19 +7,24 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+// hyungoo start
 #include <errno.h> // plus
-
-#include "common.h"           // 공용 구조체 (형건우)
-#include "ts_packet_queue.h"    // Packet Queue (형건우)
-// #include "ts_alert_queue.h"     // Alert Queue (김선권)
-#include "thread_capture.h"     // libpcap 캡처 스레드 (형건우)
 #include "shm_consumer.h" // shared memory consumer (최현구)
-// #include "thread_nfqueue.h"     // NFQUEUE 수신 스레드 (최현구)
-// #include "thread_parser.h"   // 파싱/분류 스레드 (형건우)
-// #include "thread_analyzer.h" // 융합/위협 분석 스레드 (형건우)
-// #include "thread_response.h"  // 후처리/로깅 스레드 (김선권)
+// hyungoo end
 
-// warnning message, helper func.
+#include "common.h"           // 공용 구조체
+#include "ts_packet_queue.h"    // Packet Queue
+// #include "ts_alert_queue.h"     // Alert Queue
+#include "thread_capture.h"     // libpcap 캡처 스레드 (IPS 로부터 공유 메모리를 통해 패킷을 수신하므로 이제 단순 테스트/분석 디버깅 용임)
+#include "thread_shm_receiver.h" // 캡처 스레드 대신에 shm(공유 메모리) 수신 스레드 헤더를 포함
+#include "thread_parser.h"   // 파싱/분류 스레드
+#include "sessionManager.h"
+// #include "thread_analyzer.h" // 융합/위협 분석 스레드
+// #include "thread_response.h"  // 후처리/로깅 스레드
+#include "shm_ipc.h" // IPS -> IDS rawpacket 전송을 위한 공유 메모리 구조체 정의 헤더 include
+
+// hyungoo start
+// warning message, helper func.
 static ssize_t write_all(int fd, const void* buf, size_t len) {
     const char* p = (const char*)buf;
     size_t left = len;
@@ -35,6 +40,7 @@ static ssize_t write_all(int fd, const void* buf, size_t len) {
     }
     return (ssize_t)(len - left);         // 실제 쓴 바이트
 }
+// hyungoo end
 
 // 전역 서버 소켓(== server_sock) -> 클라이언트 연결 관리/종료 시
 int server_sock_global = -1; // +init
@@ -46,10 +52,17 @@ pthread_mutex_t client_sockets_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // 스레드 간 데이터 통로인 큐
 PacketQueue packetQueue;
+SessionManager sessionManager;
 // AlertQueue alertQueue;
 
 // 프로그램의 종료를 제어하기 위한 플래그
+// volatile sig_atomic_t : 시그널 핸들러에서 사용하는 공유 변수를 안전하게 조작
 volatile sig_atomic_t is_running = 1;
+
+// 공유 메모리 포인터
+SharedPacketBuffer* sharedBuffer_global = NULL;
+// 공유 메모리 파일 디스크립터
+int shm_fd_global = -1;
 
 // 함수 프로토타입들 (하단 정의 확인)
 void handle_shutdown_signal(int signal);
@@ -69,52 +82,105 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, handle_shutdown_signal);
     signal(SIGTERM, handle_shutdown_signal);
 
+    // start -- 공유 메모리 초기화
+    printf("공유 메모리 설정 중...\n");
+    // 0. 기존 공유 메모리 객체를 먼저 제거함 (잔여 파일 에러 방지)
+    shm_unlink(SHM_NAME);
+
+    // 1. 공유 메모리 객체 생성/열기
+    shm_fd_global = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
+    if(shm_fd_global == -1){
+        perror("shm_open 실패");
+        exit(EXIT_FAILURE);
+    }
+    // 2. 공유 메모리 크기 설정
+    if(ftruncate(shm_fd_global, sizeof(SharedPacketBuffer)) == -1) {
+        perror("ftruncate 실패");
+        exit(EXIT_FAILURE);
+    }
+    // 3. 메모리 매핑
+    sharedBuffer_global = (SharedPacketBuffer*)mmap(0, sizeof(SharedPacketBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_global, 0);
+    if(sharedBuffer_global == MAP_FAILED){
+        perror("mmap 실패");
+        exit(EXIT_FAILURE);
+    }
+    // 4. 공유 동기화 객체 ini
+    // 뮤텍스와 조건 변수의 속성을 담을 객체
+    pthread_mutexattr_t mattr;
+    pthread_condattr_t cattr;
+    // 속성 구조체를 초기화
+    pthread_mutexattr_init(&mattr);
+    pthread_condattr_init(&cattr);
+    // 다른 스포레스 간 공유가 가능하도록 PTHREAD_PROCESS_SHARED 설정
+    pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+    pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED);
+    // 실제 공유 메모리에 올라가 있는 구조체 sharedBuffer_global 내부 동기화 객체들을 초기화
+    pthread_mutex_init(&sharedBuffer_global->lock, &mattr);
+    pthread_cond_init(&sharedBuffer_global->cond_read, &cattr);
+    pthread_cond_init(&sharedBuffer_global->cond_write, &cattr);
+    // 더 이상 필요 없는 attribute 객체 정리
+    pthread_mutexattr_destroy(&mattr);
+    pthread_condattr_destroy(&cattr);
+    // 버퍼 상태 초기화
+    sharedBuffer_global->count = 0;
+    sharedBuffer_global->read_idx = 0;
+    sharedBuffer_global->write_idx = 0;
+    printf("공유 메모리 초기화 완료\n");
+    // -- end 공유 메모리 초기화
+
     // 공유 자원 초기화
     tsPacketqInit(&packetQueue, &is_running);
+    // smInit 은 thread_parser.c 에서 수행함 !
     // tsAlertqInit(&alertQueue, &is_running);
     memset(client_sockets, 0, sizeof(client_sockets));
     printf("공유 자원 초기화 완료.\n");
 
+    // hyungoo start
     // SHM event consumer thread start! (IPS->IDS 텔레메트리 수신)
     if (shm_consumer_start() != 0) {
         perror("SHM 소비 스레드 시작 실패");
         // exit(EXIT_FAILURE);
     }
+    // hyungoo end
 
     // 스레드에 전달할 인자 준비
     // 각 스레드에서 common_args 를 받고 ex. args->packetqueue 와 같은 방식으로 사용
     ThreadArgs common_args = { 
-        .packetQueue = &packetQueue, 
+        .packetQueue = &packetQueue,
+        .sessionManager = &sessionManager,
+        .sharedBuffer = sharedBuffer_global, // 공유 메모리 포인터 전달
         // .alertQueue = &alertQueue,
         .isRunning = &is_running
     };
 
     // 워커 스레드 선언
-    pthread_t /*nfqueue_tid, */capture_tid /*, parser_tid, analyzer_tid, response_tid*/;
+    pthread_t /*nfqueue_tid, */capture_tid , parser_tid, shm_receiver_tid
+    /*, analyzer_tid, response_tid*/;
     pthread_t connection_tid; // 클라이언트 연결 수락용 스레드
 
     printf("IDS 워커 스레드 생성 중...\n");
 
-    // 스레드 생성 확인을 위한 출력 추가
+    // libpcap 캡처 스레드 생성 코드 부분 (테스트용)
     /*
-    if (pthread_create(&nfqueue_tid, NULL, nfqueue_thread_main, &common_args) != 0) {
-        perror("NFQUEUE 수신 스레드 생성 실패"); exit(EXIT_FAILURE);
-    }
-    printf(" -> [OK] 1-1. NFQUEUE 수신 스레드가 생성되었습니다.\n");
+        if (pthread_create(&capture_tid, NULL,  pcap_thread_main, &common_args) != 0) {
+            perror("libpcap 캡처 스레드 생성 실패"); exit(EXIT_FAILURE);
+        }
+        printf(" -> [OK] 2-1. libpcap 캡처 스레드가 생성되었습니다.\n");
     */
 
-    if (pthread_create(&capture_tid, NULL, pcap_thread_main, &common_args) != 0) {
-        perror("libpcap 캡처 스레드 생성 실패"); exit(EXIT_FAILURE);
+    // 캡처 스레드 대신 공유 메모리 수신 스레드 생성
+    if(pthread_create(&shm_receiver_tid, NULL, shm_receiver_thread_main, &common_args) != 0){
+        perror("공유 메모리 수신 스레드 생성 실패");
+        exit(EXIT_FAILURE);
     }
-    printf(" -> [OK] 2-1. libpcap 캡처 스레드가 생성되었습니다.\n");
-    
-    /*
+    printf(" -> [OK] 2-1. 공유 메모리 수신 스레드가 생성되었습니다.\n");
+
+
     if (pthread_create(&parser_tid, NULL, parser_thread_main, &common_args) != 0) {
         perror("파싱/분류 스레드 생성 실패"); exit(EXIT_FAILURE);
     }
     printf(" -> [OK] 2-2. 파싱/분류 스레드가 생성되었습니다.\n");
-    */
-
+    
     /*
     if (pthread_create(&analyzer_tid, NULL, analyzer_thread_main, &common_args) != 0) {
         perror("융합/위협 분석 스레드 생성 실패"); exit(EXIT_FAILURE);
@@ -138,10 +204,12 @@ int main(int argc, char *argv[]) {
     printf("\n모든 스레드가 정상적으로 생성되었습니다. Argus가 활성화되었습니다.\n");
     printf("Ctrl+C를 입력하면 종료됩니다.\n");
     
-    // 스레드 종료 대기
-    // pthread_join(nfqueue_tid, NULL);
+    pthread_join(shm_receiver_tid, NULL);
+    // (test용 캡처 스레드)
+    /*
     pthread_join(capture_tid, NULL);
-    // pthread_join(parser_tid, NULL);
+    */
+    pthread_join(parser_tid, NULL);
     // pthread_join(analyzer_tid, NULL);
     // pthread_join(response_tid, NULL);
     pthread_join(connection_tid, NULL);
@@ -149,8 +217,16 @@ int main(int argc, char *argv[]) {
     // 공유 자원 해제
     printf("\n모든 스레드가 종료되었습니다. 할당한 자원을 해제합니다...\n");
     tsPacketqDestroy(&packetQueue);
+    // smDestroy 는 thread_parser.c 에서 수행함 !
     // tsAlertqDestroy(&alertQueue);
     pthread_mutex_destroy(&client_sockets_mutex);
+    
+    // 공유 메모리 해제
+    munmap(sharedBuffer_global, sizeof(SharedPacketBuffer));
+    close(shm_fd_global);
+    // 시스템에서 공유 메모리 객체 제거
+    shm_unlink(SHM_NAME);
+
     printf("종료 완료.\n");
 
     return 0;
@@ -163,14 +239,48 @@ void handle_shutdown_signal(int signal) {
     printf("\n종료 시그널을 수신했습니다. 모든 스레드를 안전하게 종료합니다...\n");
     is_running = 0;
     
+    // 캡처 스레드 있을 때 테스트용
+    /*
     // 캡처 스레드 캡처 루프(dispatcher) 중단
     capture_request_stop();
+    */
 
     // 큐에서 대기 중인 스레드를 깨우기 위한 추가 조치
     tsPacketqSignalExit(&packetQueue);
     // tsAlertqSignalExit(&alertQueue);
 
+    // 공유 메모리 수신 스레드 깨우기
+    if (sharedBuffer_global != NULL) {
+        pthread_mutex_lock(&sharedBuffer_global->lock);
+        pthread_cond_broadcast(&sharedBuffer_global->cond_read);
+        pthread_cond_broadcast(&sharedBuffer_global->cond_write);
+        pthread_mutex_unlock(&sharedBuffer_global->lock);
+    }
+
+    // 클라이언트 수신 스레드 깨우기
+    /*
     if(server_sock_global != -1){
+        close(server_sock_global);
+        server_sock_global = -1;
+    }
+    */
+    if(server_sock_global != -1){
+        int dummy_sock = socket(PF_INET, SOCK_STREAM, 0);
+        if (dummy_sock != -1) {
+            struct sockaddr_in server_addr;
+            memset(&server_addr, 0, sizeof(server_addr));
+            server_addr.sin_family = AF_INET;
+            server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+            server_addr.sin_port = htons(8085); // 서버가 리슨하는 포트와 동일
+            
+            // 접속 시도 (성공하든 실패하든 상관없음, accept()를 깨우는 것이 목적)
+            connect(dummy_sock, (struct sockaddr*)&server_addr, sizeof(server_addr));
+            
+            // 임시 소켓은 바로 닫음
+            close(dummy_sock);
+        }
+        // 그 후에 서버 소켓을 닫아도 늦지 않음.
+        shutdown(server_sock_global, SHUT_RDWR); // 더 우아한 종료
         close(server_sock_global);
         server_sock_global = -1;
     }
@@ -195,6 +305,7 @@ void* handle_client_comm(void* arg) {
 
         // 명령 처리 후 응답처리 (간단하게 일단.. 첫 싲ㅏㄱ이므로 !)
 
+        // hyungoo : write_all 로 변경
         const char* msg = "명령 수신 완료\n";
         if (write_all(client_sock, msg, strlen(msg)) < 0) {
             perror("write_all");
@@ -286,6 +397,7 @@ void* client_connection_thread(void* arg) {
             // 통신을 전담할 새로운 스레드를 생성
             pthread_t tid;
             int* client_sock_ptr = (int*)malloc(sizeof(int));
+            // hyungoo : !client_sock_ptr || 추가
             if (!client_sock_ptr || client_sock_ptr == NULL) {
                 perror("메모리 할당 실패");
                 close(client_sock);
@@ -303,7 +415,8 @@ void* client_connection_thread(void* arg) {
         } else {
             printf("클라이언트 수용량 초과. 연결을 거부합니다.\n");
 
-            const char* full = "서버가 가득찼습니다.\n";
+            // hyungoo : write_all 로 변경
+            const char* full = "서버가 가득 찼습니다.\n";
             (void)write_all(client_sock, full, strlen(full));
 
 //            (void)write(client_sock, "서버가 가득 찼습니다.\n", strlen("서버가 가득 찼습니다.\n"));
@@ -312,6 +425,8 @@ void* client_connection_thread(void* arg) {
     }
 
     close(server_sock);
+  
+    // hyungoo 
     server_sock_global=-1;
 
     printf("클라이언트 연결 관리 스레드가 종료됩니다.\n");

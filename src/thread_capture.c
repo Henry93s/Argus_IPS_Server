@@ -27,27 +27,35 @@ void packet_handler(u_char* args, const struct pcap_pkthdr* header, const u_char
     // u_char* 를 PacketQueue*로 변환
     PacketQueue* queue = (PacketQueue*)args;
 
+    // 캡처된 패킷 길이가 RawPacket의 최대 크기를 넘지 않는지 확인
+    if (header->caplen == 0 || header->caplen > MAX_PACKET_SIZE) {
+        fprintf(stderr, "Packet 0 or too large (%u bytes), dropping.\n", header->caplen);
+        return;
+    }
+
     // 캡처된 패킷 데이터를 PacketQueue에 넣음
     // pkt_data는 pcap 내부 버퍼 이므로
     // 다른 스레드에서 안전하게 사용하기 위해 데이터를 복사해서 넣음
     RawPacket* new_packet = (RawPacket*)malloc(sizeof(RawPacket));
     if (new_packet) {
-        new_packet->data = (unsigned char*)malloc(header->caplen);
-        if (new_packet->data) {
+        // 이미 구조체 내부에 byte 배열로 존재하므로 malloc 필요없음.
+        // new_packet->data = (unsigned char*)malloc(header->caplen);
+        // if (new_packet->data) {
             memcpy(new_packet->data, pkt_data, header->caplen);
             new_packet->len = header->caplen;
             
             // 큐에 푸시
             tsPacketqPush(queue, new_packet);
-        } else {
-            free(new_packet);
-        }
+        // } else {
+        //    free(new_packet);
+        // }
     }
 
     // queue input 개수 체크
-    printf("[PacketQueue_개수] : %d\n", queue->count);
+    // printf("[PacketQueue_개수] : %d\n", queue->count);
 
     // (2주차 목표) 일단 수신된 패킷을 간단한 출력
+
     printf("[캡처 스레드] Packet captured, length: %d\n", header->len);
 */
 
@@ -80,6 +88,8 @@ static void packet_handler(unsigned char* args, const struct pcap_pkthdr* header
 /*
     // (2주차 목표) 일단 수신된 패킷을 간단한 출력
     printf("[캡처 스레드] Packet captured, length: %d\n", header->len);
+=======
+    // printf("[캡처 스레드] Packet captured, length: %d\n", header->len);
 }
 */
 
