@@ -1,3 +1,4 @@
+// (hyungoo)
 #ifndef THREAD_CAPTURE_H
 #define THREAD_CAPTURE_H
 #include "common.h"
