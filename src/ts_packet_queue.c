@@ -74,8 +74,10 @@ RawPacket* tsPacketqPop(PacketQueue* q) {
         pthread_cond_wait(&q->cond, &q->lock);
     }
 
+    /*
     printf("[Queue] POP woke up! is_running=%d, head is %s\n", 
            *(q->isRunning), (q->head == NULL ? "NULL" : "NOT NULL"));
+    */
 
     // 루프를 빠져나온 이유가 프로그램 종료 신호 때문인지 확인
     if (*(q->isRunning) == 0 && q->head == NULL) {

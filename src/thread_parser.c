@@ -79,7 +79,7 @@ void* parser_thread_main(void* args) {
         }
         // if(*isRunning == 0) break;
 
-        printf("[Parser Thread DEBUG] Popped a packet, len: %u\n", raw_packet->len);
+        // printf("[Parser Thread DEBUG] Popped a packet, len: %u\n", raw_packet->len);
 
         // --- 2. L2 (Ethernet) 헤더 파싱 ---
         // => NFQUEUE 특성상 일반적으로 Ethernet 헤더는 없으므로 IP 헤더부터 파싱하도록 코드 변경 작업
@@ -122,10 +122,13 @@ eth_header->type, ntohs(eth_header->type));
              continue;
         }
 
+        // test print code
+        /*
         print_ip_header(ip_header);
         unsigned int ip_header_lens = (ip_header->verIHL & 0x0F) * 4;
         TCPHeader* tcp_headers = (TCPHeader*)((uint8_t*)ip_header + ip_header_lens);
         print_tcp_header(tcp_headers);
+        */
 
         printf("[Parser DEBUG] TCP Packet 감지함! TCP header 파싱...\n");
 

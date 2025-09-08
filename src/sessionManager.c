@@ -145,7 +145,9 @@ unsigned char* smHandlePacket(SessionManager* sm, const IPHeader* ipHeader, cons
 
     // --- 3. [핵심 수정] TCP 상태 머신 로직 (Stateful Analysis) ---
     bool is_forward = (session->srcIp == srcIpInt);
-
+    
+    // 16진수로 flags 디버깅 체크
+    printf("[DEBUG TCP PACKET] tcp packet flags : 0x%02x\n", flags);
     if (flags & 0x04) { // RST
         session->state = TCP_CLOSED;
     } else if (flags & 0x01) { // FIN
@@ -165,7 +167,20 @@ unsigned char* smHandlePacket(SessionManager* sm, const IPHeader* ipHeader, cons
         if (session->state == TCP_SYN_SENT && session->nextBwdSeq != 0) {
             if (ackNum == session->nextBwdSeq) {
                 session->state = TCP_ESTABLISHED;
-                session->nextFwdSeq = ackNum;
+                // session->nextFwdSeq = ackNum;
+                printf(" [Session DEBUG] 3-way Handshake 완료로 상태 변경 -> ESTABLISHED.\n");
+            }
+        } else if(session->state < TCP_ESTABLISHED){
+            // Handshake 를 놓쳤지만 데이터 전송이 시작된 경우
+            // 이 세션은 이미 연결된 것으로 '추정'하고 상태를 강제로 변경
+            session->state = TCP_ESTABLISHED;
+            printf("  [Session DEBUG] Handshake 놓침. State 강제 변경 -> ESTABLISHED.\n");
+            
+            // 정확한 초기 SEQ를 알 수 없으므로, 현재 패킷을 기준으로 양방향 nextSeq를 모두 설정해준다.
+            if(is_forward){
+                session->nextFwdSeq = seqNum;
+            } else {
+                session->nextBwdSeq = seqNum;
             }
         }
     }
@@ -178,6 +193,9 @@ unsigned char* smHandlePacket(SessionManager* sm, const IPHeader* ipHeader, cons
         session->bwdPacketCount++;
         if (payloadLen > 0) session->bwdTotalBytes += payloadLen;
     }
+
+    printf("[DEBUG] State: %d, NextFwd: %u, NextBwd: %u, PayloadLen: %u\n",
+       session->state, session->nextFwdSeq, session->nextBwdSeq, payloadLen);
 
     // --- TCP 스트림 재조합 (ESTABLISHED 상태에서만 수행) ---
     if (payloadLen > 0 && session->state >= TCP_ESTABLISHED) {
@@ -206,7 +224,10 @@ unsigned char* smHandlePacket(SessionManager* sm, const IPHeader* ipHeader, cons
             } \
         } while(0)
 
+        printf("[REASSEMBLE-DEBUG] Before - Seq: %u, NextSeq: %u, PayloadLen: %u\n", seqNum, *nextSeq, payloadLen);
+
         if (seqNum == *nextSeq) {
+            // CASE 1. 패킷이 예상 순서대로 도착한 것
             APPEND_TO_BUFFER(payload, payloadLen);
             if (reassembledBuffer == NULL) {
                 pthread_mutex_unlock(&sm->lock);
@@ -226,7 +247,9 @@ unsigned char* smHandlePacket(SessionManager* sm, const IPHeader* ipHeader, cons
                 free(to_free->data);
                 free(to_free);
             }
+            printf("[REASSEMBLE-DEBUG] In-order packet processed. New NextSeq: %u\n", *nextSeq);
         } else if (seqNum > *nextSeq) { // 비순차적 패킷 보류 로직
+            // CASE 2. 예상하는 seqNum 보다 높은 seq 번호가 들어옴 -> 비순차적 패킷 처리 로직
             TCPFragment* newFrag = (TCPFragment*)malloc(sizeof(TCPFragment));
             if (newFrag) {
                 newFrag->seq = seqNum;
@@ -252,9 +275,11 @@ unsigned char* smHandlePacket(SessionManager* sm, const IPHeader* ipHeader, cons
                     free(newFrag);
                 }
             }
+            printf("[REASSEMBLE-DEBUG] Out-of-order packet (Seq: %u) buffered.\n", seqNum);
         }
 
         if (reassembledLen > 0) {
+            printf("[REASSEMBLE-RESULT] Buffer reassembled! Total length: %d\n", reassembledLen);
             *outLen = reassembledLen;
             reassembledStream = reassembledBuffer;
         }
@@ -265,6 +290,11 @@ unsigned char* smHandlePacket(SessionManager* sm, const IPHeader* ipHeader, cons
     return reassembledStream;
 }
 
+/*
+ smHandlePacket 에서 
+ FIN이나 RST를 받으면, 세션의 상태를 TCP_CLOSED나 TCP_FIN_WAIT로 '표시'만 하고
+ 아래의 타임아웃 클리너 함수에서 주기적으로 전체 세션 테이블을 스캔하여 activesessions 를 감소시킨다.
+*/
 void smCleanupTimeout(SessionManager* sm) {
     if (sm == NULL) return;
     
