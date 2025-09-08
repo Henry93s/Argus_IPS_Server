@@ -7,7 +7,7 @@
 void ids_log_event(const ips_event_t* ev){
   
   fprintf(stdout,
-    "[IPS-EVENT] ts=%" PRIu64 "verdict=%s rule=%u score=%u "
+    "[IPS-EVENT] ts=%" PRIu64 " verdict=%s rule=%u score=%u "
     "flow=%u %u.%u.%u.%u:%u -> %u.%u.%u.%u:%u cap=%u tot=%u proto=%u\n",
     ev->ts_ns,
     ev->verdict ? "DROP" : "ACCEPT",
@@ -17,6 +17,7 @@ void ids_log_event(const ips_event_t* ev){
     (ev->daddr)&255, (ev->daddr>>8)&255, (ev->daddr>>16)&255, (ev->daddr>>24)&255, ev->dport,
     ev->caplen, ev->tot_len, ev->proto
   );
+  
   // TODO: 세션 UI 탭/대시보드 전송, NFLOG 패킷과 5tuple+ts로 상관관계 매칭
 
   }

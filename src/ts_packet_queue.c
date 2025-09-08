@@ -20,7 +20,7 @@ void tsPacketqInit(PacketQueue* q, volatile sig_atomic_t* isRunningFlag) {
     }
     if (pthread_cond_init(&q->cond, NULL) != 0) {
         perror("PacketQueue 조건 변수 초기화 실패");
-        exit(EXIT_FAILURE);
+        exit(EXIT_FAILURE); 
     }
 }
 

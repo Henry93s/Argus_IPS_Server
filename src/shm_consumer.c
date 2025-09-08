@@ -11,6 +11,7 @@
 #include "common.h" // ThreadArgs 사용
 #include "ids_log.h"
 #include <stdlib.h>
+#include <inttypes.h>
 
 static shm_ipc_t g_ipc;
 static volatile sig_atomic_t* g_is_running;
@@ -44,9 +45,11 @@ static void* shm_consumer_loop(void* arg){
         while (ips_ring_pop(g_ipc.ring, &ev)) {
             // [핵심 로직]
             // 1. 수신된 이벤트를 로그로 출력 (기존 ids_log_event 활용)
-            printf("[IDS-Consumer] Received event from SHM. Rule ID: %u, Verdict: %s\n",
-                   ev.rule_id, ev.verdict ? "DROP" : "ACCEPT");
-            ids_log_event(&ev);
+            
+            // printf("[IDS-Consumer] Received event from SHM. Rule ID: %u, Verdict: %s\n",
+            //       ev.rule_id, ev.verdict ? "DROP" : "ACCEPT");
+            
+            // ids_log_event(&ev); // 로그 전달 코드(로그 파일 생성 예정)
 
             // 2. 이벤트의 Raw Packet 부분을 IDS 내부의 PacketQueue에 넣는다.
             if (ev.caplen > 0) {

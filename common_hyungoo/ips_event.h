@@ -3,7 +3,7 @@
 
 // event snapshot bytes n (dash board/log)
 #ifndef IPS_EVENT_SNAPLEN
-#define IPS_EVENT_SNAPLEN 160
+#define IPS_EVENT_SNAPLEN 1600
 #endif
 
 // NFQueue -> Kernel<->User copy bytes (in-line analysis)

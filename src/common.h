@@ -81,40 +81,40 @@ typedef struct {
 
 #pragma pack(push, 1)
 typedef struct EtherHeader{
-    unsigned char dstMac[6];
-    unsigned char srcMac[6];
-    unsigned short type;
+    uint8_t dstMac[6];
+    uint8_t srcMac[6];
+    uint16_t type;
 } EtherHeader;
 
-typedef struct IPHeader
-{
-    unsigned char verIHL;
-    unsigned char tos;
-    unsigned short length;
-    unsigned short id;
-    unsigned short fragOffset;
-    unsigned char TTL;
-    unsigned char protocol;
-    unsigned short checksum;
-    unsigned char srcIP[4];
-    unsigned char dstIP[4];
+// IP Header 구조체 정의
+typedef struct {
+    uint8_t verIHL;
+    uint8_t tos;
+    uint16_t length;
+    uint16_t id;
+    uint16_t fragOffset;
+    uint8_t TTL;
+    uint8_t protocol;
+    uint16_t checksum;
+    uint8_t srcIP[4];
+    uint8_t dstIP[4];
 } IPHeader;
 
 // TCP Header 구조체 정의
-typedef struct TCPHeader
-{
-    unsigned short srcPort;
-    unsigned short dstPort;
-    unsigned int seq;
-    unsigned int ack;
+typedef struct {
+    uint16_t srcPort;
+    uint16_t dstPort;
+    uint32_t seq;
+    uint32_t ack;
     // data 필드에서 option 유무에 대해서 알아야
     // TCP 헤더의 정확한 offset 을 알 수 있음
-    unsigned char data;
-    unsigned char flags;
-    unsigned short windowSize;
-    unsigned short checksum;
-    unsigned short urgent;
+    uint8_t data;   // Data offset & reserved bits
+    uint8_t flags;
+    uint16_t windowSize;
+    uint16_t checksum;
+    uint16_t urgent;
 } TCPHeader;
+
 #pragma pack(pop)
 
 #endif // COMMON_H
