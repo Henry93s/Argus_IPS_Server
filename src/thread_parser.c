@@ -7,6 +7,7 @@
 #include <netinet/if_ether.h>
 #include <arpa/inet.h>
 #include <signal.h>
+#include <time.h>
 #include "common.h"
 #include "ts_packet_queue.h"
 #include "sessionManager.h"
@@ -68,6 +69,10 @@ void* parser_thread_main(void* args) {
     smInit(&sessionManager);
 
     printf(" -> [OK] 파싱/분류 스레드가 동작을 시작합니다.\n");
+
+    // 타임아웃 정리를 위한 시간 변수
+    time_t last_cleanup_time = time(NULL);
+    const int cleanup_interval = 60; // 60초마다 타임아웃 세션 정리함수 실행
 
     while (1) {
         // 1. PacketQueue에서 RawPacket을 꺼낸다 (블로킹)
@@ -175,8 +180,17 @@ eth_header->type, ntohs(eth_header->type));
         // --- 7. 원본 RawPacket 메모리 해제 ---
         // free(raw_packet->data);
         free(raw_packet);
+
+        // --- [핵심 추가] 주기적인 타임아웃 세션 정리 ---
+        time_t current_time = time(NULL);
+        if (difftime(current_time, last_cleanup_time) > cleanup_interval) {
+            printf("[Parser Thread] Running session 정리...\n");
+            smCleanupTimeout(&sessionManager);
+            last_cleanup_time = current_time; // 마지막 정리 시간 갱신
+            printf("[Parser Thread] Session 정리 완료. Active sessions: %ld\n", sessionManager.activeSessions);
+        }
     }
-    
+
     // 종료 전 세션 매니저 리소스 해제
     smDestroy(&sessionManager);
     printf("파싱/분류 스레드가 종료됩니다.\n");

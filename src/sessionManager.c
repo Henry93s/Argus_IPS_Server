@@ -299,6 +299,7 @@ void smCleanupTimeout(SessionManager* sm) {
     if (sm == NULL) return;
     
     time_t now = time(NULL);
+    // 세션 정리 함수가 호출될 때 당시 세션이 5분 이상 죽은 세션일 때 실제 삭제 동작 수행
     const int sessionTimeout = 300;
 
     pthread_mutex_lock(&sm->lock);
