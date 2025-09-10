@@ -20,7 +20,7 @@ static void* shm_consumer_loop(void* arg){
   ThreadArgs* thread_args = (ThreadArgs*)arg;
     PacketQueue* packetQueue = thread_args->packetQueue;
 
-    printf(" -> [OK] SHM 이벤트 소비자 스레드가 동작을 시작합니다.\n");
+    printf(" -> [OK] 2-1. SHM 이벤트 소비자 스레드가 동작을 시작합니다.\n");
 
     while (*g_is_running) {
         struct timespec ts;
@@ -43,7 +43,7 @@ static void* shm_consumer_loop(void* arg){
         // 링 버퍼에 있는 모든 이벤트를 꺼내서 처리
         ips_event_t ev;
         while (ips_ring_pop(g_ipc.ring, &ev)) {
-            // [핵심 로직]
+            //
             // 1. 수신된 이벤트를 로그로 출력 (기존 ids_log_event 활용)
             
             // printf("[IDS-Consumer] Received event from SHM. Rule ID: %u, Verdict: %s\n",

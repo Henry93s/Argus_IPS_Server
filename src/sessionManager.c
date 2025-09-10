@@ -5,10 +5,7 @@
 #include <signal.h>
 #include "sessionManager.h"
 
-static unsigned int hashFunction(uint32_t srcIp, uint16_t srcPort, uint32_t dstIp, uint16_t dstPort);
-static SessionInfo* findOrCreateSession(SessionManager* sm, uint32_t srcIp, uint16_t srcPort, uint32_t dstIp, uint16_t dstPort);
-
-static unsigned int hashFunction(uint32_t srcIp, uint16_t srcPort, uint32_t dstIp, uint16_t dstPort) {
+unsigned int hashFunction(uint32_t srcIp, uint16_t srcPort, uint32_t dstIp, uint16_t dstPort) {
     unsigned int hash = srcIp ^ dstIp ^ srcPort ^ dstPort;
     return hash % HASH_TABLE_SIZE;
 }
@@ -58,7 +55,7 @@ void smDelete(SessionManager* sm, SessionInfo* sessionToDelete) {
     free(sessionToDelete);
 }
 
-static SessionInfo* findOrCreateSession(SessionManager* sm, uint32_t srcIp, uint16_t srcPort, uint32_t dstIp, uint16_t dstPort) {
+SessionInfo* findOrCreateSession(SessionManager* sm, uint32_t srcIp, uint16_t srcPort, uint32_t dstIp, uint16_t dstPort) {
     unsigned int index = hashFunction(srcIp, srcPort, dstIp, dstPort);
 
     SessionInfo* current = sm->buckets[index];
@@ -143,7 +140,7 @@ unsigned char* smHandlePacket(SessionManager* sm, const IPHeader* ipHeader, cons
     
     session->lastActiveTime = time(NULL);
 
-    // --- 3. [핵심 수정] TCP 상태 머신 로직 (Stateful Analysis) ---
+    // --- 3. TCP 상태 머신 로직 (Stateful Analysis) ---
     bool is_forward = (session->srcIp == srcIpInt);
     
     // 16진수로 flags 디버깅 체크

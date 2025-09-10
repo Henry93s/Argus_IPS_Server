@@ -11,7 +11,7 @@
 #define SHM_NAME "/argus_ips_ids_ring"
 #define PKT_MAX 512 // 공유 버퍼에 저장할 수 있는 최대 패킷 수
 
-// 공유 메모리 버퍼 구조체
+// 공유 메모리 버퍼 구조체 (사용 x, ips 쪽 구조체에 맞춤)
 typedef struct {
     pthread_mutex_t lock; // 공유 버퍼 접근을 위한 뮤텍스
     pthread_cond_t cond_read; // 데이터가 있음을 알리는 조건 변수

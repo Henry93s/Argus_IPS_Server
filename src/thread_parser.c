@@ -12,6 +12,7 @@
 #include "ts_packet_queue.h"
 #include "sessionManager.h"
 #include "thread_parser.h"
+#include "ts_analyzing_queue.h"
 
 // START : test print
 void print_ip_header(const IPHeader* ip) {
@@ -56,17 +57,21 @@ void* parser_thread_main(void* args) {
     PacketQueue* packetQueue = thread_args->packetQueue;
     // AlertQueue* alertQueue = thread_args->alertQueue; // 나중에 분석 스레드로 넘길 때 필요
     volatile sig_atomic_t* isRunning = thread_args->isRunning;
+    AnalyzingDataQueue* analyzingQueue = thread_args->analyzingQueue;
 
     // 파싱된 정보를 담을 임시 구조체 포인터
     EtherHeader* eth_header;
     IPHeader* ip_header;
     TCPHeader* tcp_header;
+    UDPHeader* udp_header; // udp 추가
+    ICMPHeader* icmp_header; // icmp 추가
     unsigned char* payload;
     unsigned int payload_len;
 
     // [3주차 목표] 세션 매니저 초기화
     SessionManager sessionManager;
     smInit(&sessionManager);
+    thread_args->sessionManager = &sessionManager; // sessionManager 포인터 연결
 
     printf(" -> [OK] 파싱/분류 스레드가 동작을 시작합니다.\n");
 
@@ -111,20 +116,23 @@ eth_header->type, ntohs(eth_header->type));
         // --- 3. L3 (IP) 헤더 파싱 ---
         // => NFQUEUE 특성상 일반적으로 Ethernet 헤더는 없으므로 IP 헤더부터 파싱하도록 코드 변경 작업
         // ip_header = (IPHeader*)(raw_packet->data + sizeof(EtherHeader));
-        ip_header = (IPHeader*)(raw_packet->data);
-        unsigned int ip_header_len = (ip_header->verIHL & 0x0F) * 4;
-        if (ip_header_len < 20) { // IP 헤더 최소 길이 체크
-             printf("[Parser Thread] Warning: IP header 길이가 최소 길이(20) 보다 작음\n");
-             // free(raw_packet->data);
-             free(raw_packet);
-             continue;
+        
+        // 남은 길이를 추적하는 변수
+        unsigned int remaining_len = raw_packet->len;
+        unsigned char* current_ptr = raw_packet->data;
+        
+        ip_header = (IPHeader*)current_ptr;
+        if(remaining_len < sizeof(IPHeader)){ // 20
+            fprintf(stderr, "[Parser Thread] Warning: 남은 패킷 길이가 IP 최소 헤더 길이(20)보다 작음 \n");
+            free(raw_packet);
+            continue;
         }
 
-        // TCP 패킷이 아니면 무시 (Protocol 타입: 6)
-        if (ip_header->protocol != 6) {
-             // free(raw_packet->data);
-             free(raw_packet);
-             continue;
+        unsigned int ip_header_len = (ip_header->verIHL & 0x0F) * 4;
+        if (ip_header_len < 20 || remaining_len < ip_header_len) { // IP 헤더 최소 길이 체크
+            fprintf(stderr, "[Parser Thread] Warning: 남은 데이터가 TCP 헤더 길이보다 짧음 \n");
+            free(raw_packet);
+            continue;
         }
 
         // test print code
@@ -135,53 +143,132 @@ eth_header->type, ntohs(eth_header->type));
         print_tcp_header(tcp_headers);
         */
 
-        printf("[Parser DEBUG] TCP Packet 감지함! TCP header 파싱...\n");
+        // 포인터와 남은 길이 업데이트
+        current_ptr += ip_header_len;
+        remaining_len -= ip_header_len;
 
-        // --- 4. L4 (TCP) 헤더 파싱 ---
-        tcp_header = (TCPHeader*)((unsigned char*)ip_header + ip_header_len);
-        unsigned int tcp_header_len = (tcp_header->data >> 4) * 4;
-        if (tcp_header_len < 20) { // TCP 헤더 최소 길이 체크
-            printf("[Parser Thread] Warning: TCP header length 가 최소 길이보다 작음(20)\n");
-            // free(raw_packet->data);
+        // --- 4-1. L4 (TCP) 헤더 파싱 ---
+        if(ip_header->protocol == 6) { // TCP
+            if (remaining_len < sizeof(TCPHeader)) { // 20
+                fprintf(stderr, "[Parser Thread] Warning: 남은 패킷 길이가 TCP 최소 헤더 길이(20)보다 작음 \n");
+                free(raw_packet);
+                continue;
+            }
+            tcp_header = (TCPHeader*)current_ptr;
+            unsigned int tcp_header_len = (tcp_header->data >> 4) * 4;
+            if (tcp_header_len < 20 || remaining_len < tcp_header_len) {
+                fprintf(stderr, "[Parser Thread] Warning: 남은 데이터가 TCP 헤더 길이보다 짧음 \n");
+                free(raw_packet);
+                continue;
+            }
+
+            // printf("[Parser DEBUG] TCP Packet 감지함! TCP header 파싱...\n");
+
+            payload = current_ptr + tcp_header_len;
+            payload_len = ntohs(ip_header->length) - ip_header_len - tcp_header_len;
+
+            int reassembled_len = 0;
+            unsigned char* reassembled_data = smHandlePacket(&sessionManager, ip_header, tcp_header, payload, &reassembled_len);
+
+            AnalyzingData* newData = (AnalyzingData*)calloc(1, sizeof(AnalyzingData));
+            if (newData) {
+                memcpy(&newData->ipHeader, ip_header, sizeof(IPHeader));
+                memcpy(&newData->tcpHeader, tcp_header, sizeof(TCPHeader));
+
+                if(reassembled_data != NULL) {
+                    newData->data = reassembled_data;
+                    newData->len = reassembled_len;
+                } else if (payload_len > 0){
+                    newData->data = (unsigned char*)malloc(payload_len);
+                    if(newData->data){
+                        memcpy(newData->data, payload, payload_len);
+                        newData->len = payload_len;
+                    }
+                }
+                tsAnalyzingqPush(analyzingQueue, newData);
+            } else {
+                if (reassembled_data) free(reassembled_data);
+            }
+        // --- 4-2. L4 (UDP) 헤더 파싱 ---
+        } else if (ip_header->protocol == 17) { // UDP
+            if (remaining_len < sizeof(UDPHeader)) {
+                fprintf(stderr, "[Parser Thread] Warning: 남은 패킷 길이가 UDP 최소 헤더 길이(8)보다 작음 \n");
+                free(raw_packet);
+                continue;
+            }
+
+            // printf("[Parser DEBUG] UDP Packet 감지함! UDP header 파싱...\n");
+
+            udp_header = (UDPHeader*)current_ptr;
+            unsigned int udp_header_len = sizeof(UDPHeader);
+            
+            payload = current_ptr + udp_header_len;
+            payload_len = ntohs(udp_header->length) - udp_header_len;
+
+            // printf("[Parser Thread] Parsed: UDP %u -> %u\n", ntohs(udp_header->srcPort), ntohs(udp_header->dstPort));
+
+            AnalyzingData* newData = (AnalyzingData*)calloc(1, sizeof(AnalyzingData));
+            if (newData) {
+                memcpy(&newData->ipHeader, ip_header, sizeof(IPHeader));
+                // AnalyzingData의 TCPHeader 구조체를 재활용하여 포트 정보 저장
+                newData->tcpHeader.srcPort = udp_header->srcPort;
+                newData->tcpHeader.dstPort = udp_header->dstPort;
+
+                if (payload_len > 0) {
+                    newData->data = (unsigned char*)malloc(payload_len);
+                    if (newData->data) {
+                        memcpy(newData->data, payload, payload_len);
+                        newData->len = payload_len;
+                    }
+                }
+                tsAnalyzingqPush(analyzingQueue, newData);
+            }
+        // --- 4-3. L3 (ICMP) 헤더 파싱 ---
+        } else if (ip_header->protocol == 1) { // ICMP
+            if (remaining_len < 4) { // ICMP 기본 헤더 4바이트
+                fprintf(stderr, "[Parser Thread] Warning: 남은 패킷 길이가 ICMP 최소 헤더 길이(4)보다 작음 \n");
+                free(raw_packet);
+                continue;
+            }
+
+            // printf("[Parser DEBUG] ICMP Packet 감지함! ICMP header 파싱...\n");
+
+            icmp_header = (ICMPHeader*)current_ptr;
+            unsigned int icmp_header_len = 8; // Type 8/0 은 8바이트, 다른 경우는 다를 수 있으나 일반적으로 8로 계산
+            if (remaining_len < icmp_header_len) icmp_header_len = 4;
+
+            payload = current_ptr + icmp_header_len;
+            payload_len = remaining_len - icmp_header_len;
+
+            // printf("[Parser Thread] Parsed: ICMP Type=%u, Code=%u\n", icmp_header->type, icmp_header->code);
+
+            AnalyzingData* newData = (AnalyzingData*)calloc(1, sizeof(AnalyzingData));
+            if (newData) {
+                memcpy(&newData->ipHeader, ip_header, sizeof(IPHeader));
+                // ICMP는 포트가 없으므로 0으로 초기화
+                newData->tcpHeader.srcPort = 0;
+                newData->tcpHeader.dstPort = 0;
+
+                if (payload_len > 0) {
+                    newData->data = (unsigned char*)malloc(payload_len);
+                    if (newData->data) {
+                        memcpy(newData->data, payload, payload_len);
+                        newData->len = payload_len;
+                    }
+                }
+                tsAnalyzingqPush(analyzingQueue, newData);
+            }
+
+        } else { // 기타 프로토콜은 무시
             free(raw_packet);
             continue;
-        }
-        
-        // --- 5. L7 (Payload) 분리 ---
-        payload = (unsigned char*)tcp_header + tcp_header_len;
-        payload_len = ntohs(ip_header->length) - ip_header_len - tcp_header_len;
-
-        printf("[Parser Thread] Parsed Packet: TCP %u -> %u\n", ntohs(tcp_header->srcPort), ntohs(tcp_header->dstPort));
-
-        // [추가된 출력] 파싱된 정보 출력
-        char srcIpStr[INET_ADDRSTRLEN], dstIpStr[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, ip_header->srcIP, srcIpStr, INET_ADDRSTRLEN);
-        inet_ntop(AF_INET, ip_header->dstIP, dstIpStr, INET_ADDRSTRLEN);
-        printf("[Parser Thread] Parsed: %s:%u -> %s:%u\n", 
-               srcIpStr, ntohs(tcp_header->srcPort), 
-               dstIpStr, ntohs(tcp_header->dstPort));
-
-        // --- 6. 세션 매니저를 통해 세션 관리 및 스트림 재조합 ---
-        int reassembled_len = 0;
-        unsigned char* reassembled_data = smHandlePacket(&sessionManager, ip_header, tcp_header, payload, &reassembled_len);
-
-        // [추가된 출력] 세션 매니저 상태 출력
-        printf("[Parser Thread] Active sessions: %ld\n", sessionManager.activeSessions);
-
-        if (reassembled_data != NULL) {
-            printf("[Parser Thread] 스트림 재조합. Length: %d\n", reassembled_len);
-            
-            // TODO: 여기서 재조합된 데이터를 '분석 스레드'로 넘겨줘야 함.
-            // (예: 새로운 큐를 사용하거나, 파싱된 정보 구조체를 만들어서 전달)
-            
-            free(reassembled_data); // 임시로 여기서 해제
         }
 
         // --- 7. 원본 RawPacket 메모리 해제 ---
         // free(raw_packet->data);
         free(raw_packet);
 
-        // --- [핵심 추가] 주기적인 타임아웃 세션 정리 ---
+        // 주기적인 타임아웃 세션 정리
         time_t current_time = time(NULL);
         if (difftime(current_time, last_cleanup_time) > cleanup_interval) {
             printf("[Parser Thread] Running session 정리...\n");

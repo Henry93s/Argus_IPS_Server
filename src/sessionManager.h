@@ -14,5 +14,7 @@ SessionInfo* smFind(SessionManager* sm, uint32_t srcIp, uint16_t srcPort, uint32
 void smDelete(SessionManager* sm, SessionInfo* sessionToDelete);
 void smCleanupTimeout(SessionManager* sm);
 void smDestroy(SessionManager* sm);
+unsigned int hashFunction(uint32_t srcIp, uint16_t srcPort, uint32_t dstIp, uint16_t dstPort);
+SessionInfo* findOrCreateSession(SessionManager* sm, uint32_t srcIp, uint16_t srcPort, uint32_t dstIp, uint16_t dstPort);
 
 #endif // SESSION_MANAGER_H

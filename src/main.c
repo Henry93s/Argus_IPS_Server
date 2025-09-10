@@ -19,12 +19,12 @@
 #include "thread_shm_receiver.h" // 캡처 스레드 대신에 shm(공유 메모리) 수신 스레드 헤더를 포함
 #include "thread_parser.h"   // 파싱/분류 스레드
 #include "sessionManager.h"
-// #include "thread_analyzer.h" // 융합/위협 분석 스레드
+#include "thread_analyzer.h" // 융합/위협 분석 스레드
+#include "ts_analyzing_queue.h" // analyzing data queue(파싱/분류 스레드 -> 분석 스레드에서 사용할 큐)
 // #include "thread_response.h"  // 후처리/로깅 스레드
 #include "../common_hyungoo/shm_ipc.h" // IPS -> IDS rawpacket 전송을 위한 공유 메모리 구조체 정의 헤더 include
 
 // hyungoo start
-// warning message, helper func.
 static ssize_t write_all(int fd, const void* buf, size_t len) {
     const char* p = (const char*)buf;
     size_t left = len;
@@ -54,6 +54,7 @@ pthread_mutex_t client_sockets_mutex = PTHREAD_MUTEX_INITIALIZER;
 // 스레드 간 데이터 통로인 큐
 PacketQueue packetQueue;
 SessionManager sessionManager;
+AnalyzingDataQueue analyzingDataQueue;
 // AlertQueue alertQueue;
 
 // 프로그램의 종료를 제어하기 위한 플래그
@@ -130,8 +131,9 @@ int main(int argc, char *argv[]) {
     */
     // -- end 공유 메모리 초기화
 
-    // 공유 자원 초기화
+    // 공유 자원 초기화(packetqueue, analyzedDataqueue, ...)
     tsPacketqInit(&packetQueue, &is_running);
+    tsAnalyzingqInit(&analyzingDataQueue, &is_running);
     // smInit 은 thread_parser.c 에서 수행함 !
     // tsAlertqInit(&alertQueue, &is_running);
     memset(client_sockets, 0, sizeof(client_sockets));
@@ -144,22 +146,22 @@ int main(int argc, char *argv[]) {
         .sessionManager = &sessionManager,
         .sharedBuffer = sharedBuffer_global, // 공유 메모리 포인터 전달
         // .alertQueue = &alertQueue,
+        .analyzingQueue = &analyzingDataQueue,
         .isRunning = &is_running
     };
 
     // hyungoo start
     // SHM event consumer thread start! (IPS->IDS 텔레메트리 수
-    printf("SHM 소비자 모듈 시작 중...\n");
+    printf("-> [Processing] 2-1. SHM 소비자 모듈 시작 중...\n");
     if (shm_consumer_start(&common_args) != 0) {
         perror("SHM 소비 스레드 시작 실패");
         exit(EXIT_FAILURE);
     }
-    printf("SHM 소비자 모듈 시작 완료.\n");
     // hyungoo end
 
     // 워커 스레드 선언
-    pthread_t /*nfqueue_tid, */capture_tid , parser_tid, shm_receiver_tid
-    /*, analyzer_tid, response_tid*/;
+    /* capture_tid, shm_receiver_tid */
+    pthread_t parser_tid, analyzer_tid /*, response_tid*/;
     pthread_t connection_tid; // 클라이언트 연결 수락용 스레드
 
     printf("IDS 워커 스레드 생성 중...\n");
@@ -186,12 +188,10 @@ int main(int argc, char *argv[]) {
     }
     printf(" -> [OK] 2-2. 파싱/분류 스레드가 생성되었습니다.\n");
     
-    /*
     if (pthread_create(&analyzer_tid, NULL, analyzer_thread_main, &common_args) != 0) {
         perror("융합/위협 분석 스레드 생성 실패"); exit(EXIT_FAILURE);
     }
     printf(" -> [OK] 2-3. 융합/위협 분석 스레드가 생성되었습니다.\n");
-    */
 
     /*
     if (pthread_create(&response_tid, NULL, response_thread_main, &common_args) != 0) {
@@ -215,13 +215,14 @@ int main(int argc, char *argv[]) {
     pthread_join(capture_tid, NULL);
     */
     pthread_join(parser_tid, NULL);
-    // pthread_join(analyzer_tid, NULL);
+    pthread_join(analyzer_tid, NULL);
     // pthread_join(response_tid, NULL);
     pthread_join(connection_tid, NULL);
 
     // 공유 자원 해제
     printf("\n모든 스레드가 종료되었습니다. 할당한 자원을 해제합니다...\n");
     tsPacketqDestroy(&packetQueue);
+    tsAnalyzingqDestroy(&analyzingDataQueue);
     // smDestroy 는 thread_parser.c 에서 수행함 !
     // tsAlertqDestroy(&alertQueue);
     pthread_mutex_destroy(&client_sockets_mutex);
@@ -253,6 +254,7 @@ void handle_shutdown_signal(int signal) {
 
     // 큐에서 대기 중인 스레드를 깨우기 위한 추가 조치
     tsPacketqSignalExit(&packetQueue);
+    tsAnalyzingqSignalExit(&analyzingDataQueue);
     // tsAlertqSignalExit(&alertQueue);
 
     // 공유 메모리 수신 스레드 깨우기
@@ -305,7 +307,7 @@ void* handle_client_comm(void* arg) {
         buffer[read_len] = '\0';
         printf("[Client %d] 메시지 수신: %s", client_sock, buffer);
 
-        // Todo list 3~4주차? (직접 명령 받을 때 추가 json 받고 파싱) : 여기서 수신된 JSON 명령을 파싱하고,
+        // Todo list 5주차 예정 (직접 명령 받을 때 추가 json 받고 파싱) : 여기서 수신된 JSON 명령을 파싱하고,
         // AlertQueue나 다른 메커니즘을 통해 다른 스레드에 작업을 요청해야 함.
         // (예: "스트리밍 시작" 명령을 받으면, 홈캠 서버로 전달)
 
